@@ -9,7 +9,7 @@ module dependencies and changed files.
   references across complex directory structures
 - **Multiple monorepo patterns** - Supports various organizational patterns
   (shared modules, multi-environment, multi-domain, multi-account)
-- **Git-based or manual file input** - Auto-detect changes via git diff or
+- **Git-based or manual file input** - Auto-detect changes via Git diff or
   provide files manually
 - **Glob pattern filtering** - Include/exclude files using glob patterns
 - **Security-hardened** - No shell injection vulnerabilities, input sanitization
