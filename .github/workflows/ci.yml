@@ -42,7 +42,7 @@ jobs:
 
       - name: Test
         id: npm-ci-test
-        run: npm run ci-test
+        run: npm test
 
   test-action:
     name: GitHub Actions Test
@@ -52,13 +52,33 @@ jobs:
       - name: Checkout
         id: checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create test files
+        run: |
+          mkdir -p modules/vpc services/api/production
+          echo 'resource "aws_vpc" "main" {}' > modules/vpc/main.tf
+          echo 'module "vpc" { source = "../../modules/vpc" }' > services/api/production/main.tf
 
       - name: Test Local Action
         id: test-action
         uses: ./
         with:
-          milliseconds: 2000
+          changed-files: |
+            modules/vpc/main.tf
+            services/api/production/main.tf
 
       - name: Print Output
         id: output
-        run: echo "${{ steps.test-action.outputs.time }}"
+        run: |
+          echo "Changed directories: ${{ steps.test-action.outputs.changed-directories }}"
+
+      - name: Verify Output
+        run: |
+          OUTPUT='${{ steps.test-action.outputs.changed-directories }}'
+          echo "Output: $OUTPUT"
+          if [ -z "$OUTPUT" ]; then
+            echo "Error: No output received"
+            exit 1
+          fi
