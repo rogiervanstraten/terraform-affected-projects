@@ -11,8 +11,18 @@ export async function run(): Promise<void> {
       'changed-files',
       { required: false }
     )
-    const baseRef: string = core.getInput('base-ref', { required: false })
-    const headRef: string = core.getInput('head-ref', { required: false })
+    let baseRef: string = core.getInput('base-ref', { required: false })
+    let headRef: string = core.getInput('head-ref', { required: false })
+
+    if (
+      !baseRef &&
+      !headRef &&
+      process.env.GITHUB_EVENT_NAME === 'pull_request'
+    ) {
+      baseRef = `origin/${process.env.GITHUB_BASE_REF || 'main'}`
+      headRef = `origin/${process.env.GITHUB_HEAD_REF || 'HEAD'}`
+    }
+
     const filesPatterns: string[] = core.getMultilineInput('files', {
       required: false
     })
@@ -31,6 +41,11 @@ export async function run(): Promise<void> {
     const terraformProjectResolver = new TerraformProjectResolverService(
       filesystemAdapter
     )
+
+    core.debug(
+      `Using refs - base: ${baseRef || 'undefined'}, head: ${headRef || 'undefined'}`
+    )
+    core.debug(`GitHub event: ${process.env.GITHUB_EVENT_NAME || 'undefined'}`)
 
     let changedFiles = await fileChangeDetector.detectChangedFiles({
       files: changedFilesInput.length > 0 ? changedFilesInput : undefined,

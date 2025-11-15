@@ -27290,7 +27290,25 @@ class GitAdapter {
         return this.executeGitDiff(base, head);
     }
     async getChangedFilesForCurrentCommit() {
-        return this.executeGitDiff('HEAD^', 'HEAD');
+        try {
+            return this.executeGitDiff('HEAD^', 'HEAD');
+        }
+        catch {
+            try {
+                const output = execSync('git show --name-only --format= HEAD', {
+                    encoding: 'utf-8',
+                    maxBuffer: 10 * 1024 * 1024,
+                    timeout: 30000
+                });
+                return output
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean);
+            }
+            catch {
+                return [];
+            }
+        }
     }
 }
 
@@ -29734,8 +29752,14 @@ class TerraformProjectResolverService {
 async function run() {
     try {
         const changedFilesInput = coreExports.getMultilineInput('changed-files', { required: false });
-        const baseRef = coreExports.getInput('base-ref', { required: false });
-        const headRef = coreExports.getInput('head-ref', { required: false });
+        let baseRef = coreExports.getInput('base-ref', { required: false });
+        let headRef = coreExports.getInput('head-ref', { required: false });
+        if (!baseRef &&
+            !headRef &&
+            process.env.GITHUB_EVENT_NAME === 'pull_request') {
+            baseRef = `origin/${process.env.GITHUB_BASE_REF || 'main'}`;
+            headRef = `origin/${process.env.GITHUB_HEAD_REF || 'HEAD'}`;
+        }
         const filesPatterns = coreExports.getMultilineInput('files', {
             required: false
         });
@@ -29747,6 +29771,8 @@ async function run() {
         const filesystemAdapter = new FilesystemAdapter();
         const fileChangeDetector = new FileChangeDetectorService(gitAdapter);
         const terraformProjectResolver = new TerraformProjectResolverService(filesystemAdapter);
+        coreExports.debug(`Using refs - base: ${baseRef || 'undefined'}, head: ${headRef || 'undefined'}`);
+        coreExports.debug(`GitHub event: ${process.env.GITHUB_EVENT_NAME || 'undefined'}`);
         let changedFiles = await fileChangeDetector.detectChangedFiles({
             files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
             base: baseRef || undefined,

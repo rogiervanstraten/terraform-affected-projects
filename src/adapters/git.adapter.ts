@@ -57,6 +57,23 @@ export class GitAdapter implements GitPort {
   }
 
   async getChangedFilesForCurrentCommit(): Promise<string[]> {
-    return this.executeGitDiff('HEAD^', 'HEAD')
+    try {
+      return this.executeGitDiff('HEAD^', 'HEAD')
+    } catch {
+      try {
+        const output = execSync('git show --name-only --format= HEAD', {
+          encoding: 'utf-8',
+          maxBuffer: 10 * 1024 * 1024,
+          timeout: 30000
+        })
+
+        return output
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+      } catch {
+        return []
+      }
+    }
   }
 }
