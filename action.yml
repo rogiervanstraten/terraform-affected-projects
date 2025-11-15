@@ -32,13 +32,15 @@ inputs:
   files:
     description: |
       Include only files matching these glob patterns (multiline).
-      If not specified, all files are included.
+      Defaults to Terraform files if not specified.
       Example:
         files: |
           **.tf
           **.tfvars
     required: false
-    default: ''
+    default: |
+      **.tf
+      **.tfvars
   files-ignore:
     description: |
       Exclude files matching these glob patterns (multiline).
