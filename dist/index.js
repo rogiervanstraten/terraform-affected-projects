@@ -27268,18 +27268,23 @@ class GitAdapter {
     executeGitDiff(base, head) {
         const sanitizedBase = this.sanitizeRef(base);
         const sanitizedHead = this.sanitizeRef(head);
+        const command = `git diff --name-only ${sanitizedBase}..${sanitizedHead}`;
+        coreExports.debug(`Executing git command: ${command}`);
         try {
-            const output = execSync(`git diff --name-only ${sanitizedBase}..${sanitizedHead}`, {
+            const output = execSync(command, {
                 encoding: 'utf-8',
                 maxBuffer: 10 * 1024 * 1024,
                 timeout: 30000
             });
-            return output
+            const files = output
                 .split('\n')
                 .map((line) => line.trim())
                 .filter(Boolean);
+            coreExports.debug(`Git diff returned ${files.length} files`);
+            return files;
         }
         catch (error) {
+            coreExports.debug(`Git diff command failed: ${error}`);
             if (error instanceof Error) {
                 throw new Error(`Git diff failed: ${error.message}`);
             }
@@ -27290,22 +27295,30 @@ class GitAdapter {
         return this.executeGitDiff(base, head);
     }
     async getChangedFilesForCurrentCommit() {
+        coreExports.debug('Attempting to get changed files for current commit');
         try {
+            coreExports.debug('Trying HEAD^..HEAD diff');
             return this.executeGitDiff('HEAD^', 'HEAD');
         }
-        catch {
+        catch (error) {
+            coreExports.debug(`HEAD^..HEAD failed, trying fallback: ${error}`);
             try {
-                const output = execSync('git show --name-only --format= HEAD', {
+                const command = 'git show --name-only --format= HEAD';
+                coreExports.debug(`Executing fallback command: ${command}`);
+                const output = execSync(command, {
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
                     timeout: 30000
                 });
-                return output
+                const files = output
                     .split('\n')
                     .map((line) => line.trim())
                     .filter(Boolean);
+                coreExports.debug(`Fallback command returned ${files.length} files`);
+                return files;
             }
-            catch {
+            catch (fallbackError) {
+                coreExports.debug(`Fallback command also failed: ${fallbackError}`);
                 return [];
             }
         }
@@ -29504,15 +29517,15 @@ class FileChangeDetectorService {
      * Otherwise, use git to detect changes
      */
     async detectChangedFiles(config) {
-        // If files are explicitly provided, use them
         if (config.files && config.files.length > 0) {
+            coreExports.debug(`Using manually provided files: ${config.files.length} files`);
             return config.files;
         }
-        // Otherwise, detect via git
         if (config.base && config.head) {
+            coreExports.debug(`Using git diff with base="${config.base}" and head="${config.head}"`);
             return this.gitPort.getChangedFiles(config.base, config.head);
         }
-        // Default: get changes for current commit
+        coreExports.debug('Using default git detection for current commit');
         return this.gitPort.getChangedFilesForCurrentCommit();
     }
 }
@@ -29751,14 +29764,22 @@ class TerraformProjectResolverService {
 
 async function run() {
     try {
+        coreExports.info('Starting terraform-affected-projects action');
         const changedFilesInput = coreExports.getMultilineInput('changed-files', { required: false });
         let baseRef = coreExports.getInput('base-ref', { required: false });
         let headRef = coreExports.getInput('head-ref', { required: false });
+        coreExports.debug(`Input - changed-files: ${JSON.stringify(changedFilesInput)}`);
+        coreExports.debug(`Input - base-ref: "${baseRef}"`);
+        coreExports.debug(`Input - head-ref: "${headRef}"`);
+        coreExports.debug(`GitHub event: ${process.env.GITHUB_EVENT_NAME || 'undefined'}`);
+        coreExports.debug(`GitHub base ref env: ${process.env.GITHUB_BASE_REF || 'undefined'}`);
+        coreExports.debug(`GitHub head ref env: ${process.env.GITHUB_HEAD_REF || 'undefined'}`);
         if (!baseRef &&
             !headRef &&
             process.env.GITHUB_EVENT_NAME === 'pull_request') {
             baseRef = `origin/${process.env.GITHUB_BASE_REF || 'main'}`;
             headRef = `origin/${process.env.GITHUB_HEAD_REF || 'HEAD'}`;
+            coreExports.info(`Detected pull request, using refs: base="${baseRef}", head="${headRef}"`);
         }
         const filesPatterns = coreExports.getMultilineInput('files', {
             required: false
@@ -29766,26 +29787,32 @@ async function run() {
         const filesIgnorePatterns = coreExports.getMultilineInput('files-ignore', { required: false });
         const resolveRootInput = coreExports.getBooleanInput('resolve-root');
         const ignorePathsInput = coreExports.getMultilineInput('ignore-paths');
+        coreExports.debug(`File patterns (include): ${JSON.stringify(filesPatterns)}`);
+        coreExports.debug(`File patterns (ignore): ${JSON.stringify(filesIgnorePatterns)}`);
+        coreExports.debug(`Resolve root: ${resolveRootInput}`);
+        coreExports.debug(`Ignore paths: ${JSON.stringify(ignorePathsInput)}`);
         const gitAdapter = new GitAdapter();
         const fileFilterAdapter = new FileFilterAdapter();
         const filesystemAdapter = new FilesystemAdapter();
         const fileChangeDetector = new FileChangeDetectorService(gitAdapter);
         const terraformProjectResolver = new TerraformProjectResolverService(filesystemAdapter);
-        coreExports.debug(`Using refs - base: ${baseRef || 'undefined'}, head: ${headRef || 'undefined'}`);
-        coreExports.debug(`GitHub event: ${process.env.GITHUB_EVENT_NAME || 'undefined'}`);
+        coreExports.info(`Detecting changed files with refs - base: ${baseRef || 'undefined'}, head: ${headRef || 'undefined'}`);
         let changedFiles = await fileChangeDetector.detectChangedFiles({
             files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
             base: baseRef || undefined,
             head: headRef || undefined
         });
-        coreExports.debug(`Detected ${changedFiles.length} changed files`);
+        coreExports.info(`Detected ${changedFiles.length} changed files`);
+        coreExports.debug(`Changed files: ${JSON.stringify(changedFiles)}`);
         changedFiles = fileFilterAdapter.filter(changedFiles, filesPatterns, filesIgnorePatterns);
-        coreExports.debug(`After filtering: ${changedFiles.length} files (include: ${filesPatterns.length} patterns, exclude: ${filesIgnorePatterns.length} patterns)`);
+        coreExports.info(`After filtering: ${changedFiles.length} files (include: ${filesPatterns.length} patterns, exclude: ${filesIgnorePatterns.length} patterns)`);
+        coreExports.debug(`Filtered files: ${JSON.stringify(changedFiles)}`);
         const changedDirectories = await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
             resolveRoot: resolveRootInput,
             ignoredPaths: ignorePathsInput
         });
         coreExports.info(`Found ${changedDirectories.length} affected project(s)`);
+        coreExports.info(`Affected directories: ${JSON.stringify(changedDirectories)}`);
         coreExports.setOutput('changed-directories', JSON.stringify(changedDirectories));
     }
     catch (error) {

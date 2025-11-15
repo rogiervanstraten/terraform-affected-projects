@@ -1,3 +1,4 @@
+import * as core from '@actions/core'
 import type { GitPort } from '../ports/git.port.js'
 
 export interface FileChangeDetectorConfig {
@@ -21,17 +22,19 @@ export class FileChangeDetectorService {
   async detectChangedFiles(
     config: FileChangeDetectorConfig
   ): Promise<string[]> {
-    // If files are explicitly provided, use them
     if (config.files && config.files.length > 0) {
+      core.debug(`Using manually provided files: ${config.files.length} files`)
       return config.files
     }
 
-    // Otherwise, detect via git
     if (config.base && config.head) {
+      core.debug(
+        `Using git diff with base="${config.base}" and head="${config.head}"`
+      )
       return this.gitPort.getChangedFiles(config.base, config.head)
     }
 
-    // Default: get changes for current commit
+    core.debug('Using default git detection for current commit')
     return this.gitPort.getChangedFilesForCurrentCommit()
   }
 }
