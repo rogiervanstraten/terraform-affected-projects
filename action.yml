@@ -1,23 +1,70 @@
-name: The name of your action here
-description: Provide a description here
-author: Your name or organization here
+name: terraform-affected-projects
+description:
+  Detects affected Terraform projects in monorepos by analyzing module
+  dependencies and changed files
+author: Rogier van Straten <rogier@from89.com>
 
 # Add your action's branding here. This will appear on the GitHub Marketplace.
 branding:
-  icon: heart
-  color: red
+  icon: git-branch
+  color: purple
 
 # Define your inputs here.
 inputs:
-  milliseconds:
-    description: Your input description here
-    required: true
-    default: '1000'
+  changed-files:
+    description:
+      'Manually provide a list of changed files (optional, will auto-detect via
+      git if not provided)'
+    required: false
+    default: ''
+  base-ref:
+    description:
+      'Base git reference for diff (e.g., HEAD^, commit SHA). Used for
+      auto-detection.'
+    required: false
+    default: ''
+  head-ref:
+    description:
+      'Head git reference for diff (e.g., HEAD, commit SHA). Used for
+      auto-detection.'
+    required: false
+    default: ''
+  files:
+    description: |
+      Include only files matching these glob patterns (multiline).
+      If not specified, all files are included.
+      Example:
+        files: |
+          **.tf
+          **.tfvars
+    required: false
+    default: ''
+  files-ignore:
+    description: |
+      Exclude files matching these glob patterns (multiline).
+      Example:
+        files-ignore: |
+          **/*.md
+          .github/**
+    required: false
+    default: ''
+  resolve-root:
+    description:
+      'Should projects be resolved from changes to files in the root directory?'
+    required: false
+    default: 'false'
+  ignore-paths:
+    description: 'A list of paths to ignore'
+    required: false
+    default: |
+      .
+      .git
+      node_modules
 
 # Define your outputs here.
 outputs:
-  time:
-    description: Your output description here
+  changed-directories:
+    description: A list of changed directories
 
 runs:
   using: node20
