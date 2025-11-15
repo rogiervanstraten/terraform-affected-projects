@@ -1,12 +1,16 @@
 # Terraform Affected Projects
 
-GitHub Action to detect affected Terraform projects in monorepos by analyzing module dependencies and changed files.
+GitHub Action to detect affected Terraform projects in monorepos by analyzing
+module dependencies and changed files.
 
 ## Features
 
-- **Path-aware dependency resolution** - Correctly resolves Terraform module references across complex directory structures
-- **Multiple monorepo patterns** - Supports various organizational patterns (shared modules, multi-environment, multi-domain, multi-account)
-- **Git-based or manual file input** - Auto-detect changes via git diff or provide files manually
+- **Path-aware dependency resolution** - Correctly resolves Terraform module
+  references across complex directory structures
+- **Multiple monorepo patterns** - Supports various organizational patterns
+  (shared modules, multi-environment, multi-domain, multi-account)
+- **Git-based or manual file input** - Auto-detect changes via git diff or
+  provide files manually
 - **Glob pattern filtering** - Include/exclude files using glob patterns
 - **Security-hardened** - No shell injection vulnerabilities, input sanitization
 
