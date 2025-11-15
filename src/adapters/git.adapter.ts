@@ -32,8 +32,6 @@ export class GitAdapter implements GitPort {
     const sanitizedHead = this.sanitizeRef(head)
     const command = `git diff --name-only ${sanitizedBase}..${sanitizedHead}`
 
-    core.debug(`Executing git command: ${command}`)
-
     try {
       const output = execSync(command, {
         encoding: 'utf-8',
@@ -41,15 +39,11 @@ export class GitAdapter implements GitPort {
         timeout: 30000
       })
 
-      const files = output
+      return output
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
-
-      core.debug(`Git diff returned ${files.length} files`)
-      return files
     } catch (error) {
-      core.debug(`Git diff command failed: ${error}`)
       if (error instanceof Error) {
         throw new Error(`Git diff failed: ${error.message}`)
       }
@@ -58,21 +52,34 @@ export class GitAdapter implements GitPort {
   }
 
   async getChangedFiles(base: string, head: string): Promise<string[]> {
-    return this.executeGitDiff(base, head)
+    try {
+      const mergeBase = execSync(
+        `git merge-base ${this.sanitizeRef(head)} ${this.sanitizeRef(base)}`,
+        {
+          encoding: 'utf-8',
+          timeout: 10000
+        }
+      ).trim()
+
+      return this.executeGitDiff(mergeBase, head)
+    } catch {
+      try {
+        return this.executeGitDiff(base, head)
+      } catch {
+        core.warning(
+          `Unable to determine changes between ${base} and ${head}, falling back to current commit`
+        )
+        return this.getChangedFilesForCurrentCommit()
+      }
+    }
   }
 
   async getChangedFilesForCurrentCommit(): Promise<string[]> {
-    core.debug('Attempting to get changed files for current commit')
-
     try {
-      core.debug('Trying HEAD^..HEAD diff')
       return this.executeGitDiff('HEAD^', 'HEAD')
-    } catch (error) {
-      core.debug(`HEAD^..HEAD failed, trying fallback: ${error}`)
-
+    } catch {
       try {
         const command = 'git show --name-only --format= HEAD'
-        core.debug(`Executing fallback command: ${command}`)
 
         const output = execSync(command, {
           encoding: 'utf-8',
@@ -80,15 +87,11 @@ export class GitAdapter implements GitPort {
           timeout: 30000
         })
 
-        const files = output
+        return output
           .split('\n')
           .map((line) => line.trim())
           .filter(Boolean)
-
-        core.debug(`Fallback command returned ${files.length} files`)
-        return files
-      } catch (fallbackError) {
-        core.debug(`Fallback command also failed: ${fallbackError}`)
+      } catch {
         return []
       }
     }

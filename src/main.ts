@@ -11,32 +11,46 @@ export async function run(): Promise<void> {
 
     const changedFilesInput: string[] = core.getMultilineInput(
       'changed-files',
-      { required: false }
+      {
+        required: false
+      }
     )
+
     let baseRef: string = core.getInput('base-ref', { required: false })
     let headRef: string = core.getInput('head-ref', { required: false })
-
-    core.debug(`Input - changed-files: ${JSON.stringify(changedFilesInput)}`)
-    core.debug(`Input - base-ref: "${baseRef}"`)
-    core.debug(`Input - head-ref: "${headRef}"`)
-    core.debug(`GitHub event: ${process.env.GITHUB_EVENT_NAME || 'undefined'}`)
-    core.debug(
-      `GitHub base ref env: ${process.env.GITHUB_BASE_REF || 'undefined'}`
-    )
-    core.debug(
-      `GitHub head ref env: ${process.env.GITHUB_HEAD_REF || 'undefined'}`
-    )
 
     if (
       !baseRef &&
       !headRef &&
       process.env.GITHUB_EVENT_NAME === 'pull_request'
     ) {
-      baseRef = `origin/${process.env.GITHUB_BASE_REF || 'main'}`
-      headRef = `origin/${process.env.GITHUB_HEAD_REF || 'HEAD'}`
-      core.info(
-        `Detected pull request, using refs: base="${baseRef}", head="${headRef}"`
-      )
+      try {
+        const event = process.env.GITHUB_EVENT_PATH
+        if (event) {
+          const fs = await import('node:fs')
+          const eventData = JSON.parse(fs.readFileSync(event, 'utf8'))
+
+          if (eventData.pull_request) {
+            baseRef = eventData.pull_request.base.sha
+            headRef = eventData.pull_request.head.sha || 'HEAD'
+            core.info(`Using PR SHAs - base: ${baseRef}, head: ${headRef}`)
+          } else {
+            throw new Error('No pull_request data in event')
+          }
+        } else {
+          throw new Error('No GITHUB_EVENT_PATH')
+        }
+      } catch (error) {
+        core.debug(`Failed to parse PR event data: ${error}`)
+        core.info('Falling back to environment variables')
+
+        const baseBranch = process.env.GITHUB_BASE_REF || 'main'
+
+        baseRef = `remotes/origin/${baseBranch}`
+        headRef = 'HEAD'
+
+        core.info(`Using branch refs - base: ${baseRef}, head: ${headRef}`)
+      }
     }
 
     const filesPatterns: string[] = core.getMultilineInput('files', {
@@ -49,11 +63,6 @@ export async function run(): Promise<void> {
     const resolveRootInput: boolean = core.getBooleanInput('resolve-root')
     const ignorePathsInput: string[] = core.getMultilineInput('ignore-paths')
 
-    core.debug(`File patterns (include): ${JSON.stringify(filesPatterns)}`)
-    core.debug(`File patterns (ignore): ${JSON.stringify(filesIgnorePatterns)}`)
-    core.debug(`Resolve root: ${resolveRootInput}`)
-    core.debug(`Ignore paths: ${JSON.stringify(ignorePathsInput)}`)
-
     const gitAdapter = new GitAdapter()
     const fileFilterAdapter = new FileFilterAdapter()
     const filesystemAdapter = new FilesystemAdapter()
@@ -63,10 +72,6 @@ export async function run(): Promise<void> {
       filesystemAdapter
     )
 
-    core.info(
-      `Detecting changed files with refs - base: ${baseRef || 'undefined'}, head: ${headRef || 'undefined'}`
-    )
-
     let changedFiles = await fileChangeDetector.detectChangedFiles({
       files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
       base: baseRef || undefined,
@@ -74,7 +79,6 @@ export async function run(): Promise<void> {
     })
 
     core.info(`Detected ${changedFiles.length} changed files`)
-    core.debug(`Changed files: ${JSON.stringify(changedFiles)}`)
 
     changedFiles = fileFilterAdapter.filter(
       changedFiles,
@@ -82,10 +86,7 @@ export async function run(): Promise<void> {
       filesIgnorePatterns
     )
 
-    core.info(
-      `After filtering: ${changedFiles.length} files (include: ${filesPatterns.length} patterns, exclude: ${filesIgnorePatterns.length} patterns)`
-    )
-    core.debug(`Filtered files: ${JSON.stringify(changedFiles)}`)
+    core.info(`After filtering: ${changedFiles.length} files`)
 
     const changedDirectories =
       await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
@@ -94,7 +95,9 @@ export async function run(): Promise<void> {
       })
 
     core.info(`Found ${changedDirectories.length} affected project(s)`)
-    core.info(`Affected directories: ${JSON.stringify(changedDirectories)}`)
+    if (changedDirectories.length > 0) {
+      core.info(`Affected directories: ${changedDirectories.join(', ')}`)
+    }
     core.setOutput('changed-directories', JSON.stringify(changedDirectories))
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message)

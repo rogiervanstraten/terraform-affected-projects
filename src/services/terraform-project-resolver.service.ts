@@ -110,7 +110,9 @@ export class TerraformProjectResolverService {
     while (stack.length > 0) {
       const currentPath = stack.pop()!
 
-      if (processedDirs.has(currentPath)) continue
+      if (processedDirs.has(currentPath)) {
+        continue
+      }
       processedDirs.add(currentPath)
 
       if (currentPath === '.' && resolveRoot) {
