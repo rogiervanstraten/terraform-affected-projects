@@ -49,11 +49,7 @@ export class TerraformProjectResolverService {
   private async findFilesUsingModulePath(
     modulePath: string
   ): Promise<string[]> {
-    return await this.filesystem.searchFileContents(
-      modulePath,
-      '**/*.tf',
-      false
-    )
+    return await this.findFilesReferencingModule(modulePath)
   }
 
   private async findAllProjects(): Promise<string[]> {

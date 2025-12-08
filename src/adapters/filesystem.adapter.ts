@@ -40,9 +40,8 @@ export class FilesystemAdapter implements FilesystemPort {
           files.push(relativePath)
         }
       }
-    } catch {
-      // Skip directories we can't read
-    }
+      // eslint-disable-next-line no-empty
+    } catch {}
 
     return files
   }
@@ -51,7 +50,13 @@ export class FilesystemAdapter implements FilesystemPort {
     pattern: string,
     excludePaths: string[] = []
   ): Promise<string[]> {
-    const allFiles = await this.walkDirectory(this.baseDir, excludePaths)
+    const defaultExcludes = ['.git', 'node_modules', 'dist', '.terraform']
+    const allExcludes = [
+      ...defaultExcludes,
+      ...excludePaths.filter((p) => !defaultExcludes.includes(p))
+    ]
+
+    const allFiles = await this.walkDirectory(this.baseDir, allExcludes)
 
     return allFiles.filter((file) => {
       const fileName = file.split('/').pop() || ''

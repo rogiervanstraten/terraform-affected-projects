@@ -29384,19 +29384,11 @@ minimatch.Minimatch = Minimatch;
 minimatch.escape = escape;
 minimatch.unescape = unescape;
 
-/**
- * File filter adapter using minimatch for glob pattern matching
- * Implements secure file filtering with glob patterns
- */
 class FileFilterAdapter {
-    /**
-     * Check if a file matches any of the given patterns
-     */
     matchesAnyPattern(file, patterns) {
         if (patterns.length === 0)
             return false;
         return patterns.some((pattern) => {
-            // Support negation patterns (starting with !)
             if (pattern.startsWith('!')) {
                 const negatedPattern = pattern.slice(1);
                 return !minimatch(file, negatedPattern, { dot: true });
@@ -29445,14 +29437,18 @@ class FilesystemAdapter {
                     files.push(relativePath);
                 }
             }
+            // eslint-disable-next-line no-empty
         }
-        catch {
-            // Skip directories we can't read
-        }
+        catch { }
         return files;
     }
     async findFiles(pattern, excludePaths = []) {
-        const allFiles = await this.walkDirectory(this.baseDir, excludePaths);
+        const defaultExcludes = ['.git', 'node_modules', 'dist', '.terraform'];
+        const allExcludes = [
+            ...defaultExcludes,
+            ...excludePaths.filter((p) => !defaultExcludes.includes(p))
+        ];
+        const allFiles = await this.walkDirectory(this.baseDir, allExcludes);
         return allFiles.filter((file) => {
             const fileName = file.split('/').pop() || '';
             return fileName === pattern || minimatch(file, pattern, { dot: true });
@@ -29498,20 +29494,11 @@ class FilesystemAdapter {
     }
 }
 
-/**
- * Service for detecting changed files
- * This is the domain/application layer that uses the GitPort
- */
 class FileChangeDetectorService {
     gitPort;
     constructor(gitPort) {
         this.gitPort = gitPort;
     }
-    /**
-     * Detect changed files based on configuration
-     * If files are provided manually, use those
-     * Otherwise, use git to detect changes
-     */
     async detectChangedFiles(config) {
         if (config.files && config.files.length > 0) {
             return config.files;
@@ -29679,7 +29666,7 @@ class TerraformProjectResolverService {
         return referencingFiles;
     }
     async findFilesUsingModulePath(modulePath) {
-        return await this.filesystem.searchFileContents(modulePath, '**/*.tf', false);
+        return await this.findFilesReferencingModule(modulePath);
     }
     async findAllProjects() {
         const providerFiles = await this.filesystem.findFiles('provider.tf', [
@@ -29829,10 +29816,6 @@ async function run() {
     }
 }
 
-/**
- * The entrypoint for the action. This file simply imports and runs the action's
- * main logic.
- */
 /* istanbul ignore next */
 run();
 //# sourceMappingURL=index.js.map
