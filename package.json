@@ -68,5 +68,10 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-linux-x64-gnu": "*"
+  },
+  "overrides": {
+    "@octokit/plugin-paginate-rest": "^11.3.6",
+    "@octokit/request": "^9.1.3",
+    "@octokit/request-error": "^6.1.5"
   }
 }
