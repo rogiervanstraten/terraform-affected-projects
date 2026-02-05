@@ -46,6 +46,8 @@ describe('TerraformProjectResolverService - Nested Modules', () => {
       expect(result).toContain('services/api/production')
       // Should NOT include services/web/production which doesn't use the module
       expect(result).not.toContain('services/web/production')
+      // Should only affect the one project
+      expect(result).toHaveLength(1)
     })
 
     it('should detect projects when parent module changes', async () => {
@@ -55,6 +57,8 @@ describe('TerraformProjectResolverService - Nested Modules', () => {
 
       // Assert: Should detect services/api/production
       expect(result).toContain('services/api/production')
+      expect(result).not.toContain('services/web/production')
+      expect(result).toHaveLength(1)
     })
 
     it('should detect projects when nested module outputs change', async () => {
@@ -64,6 +68,8 @@ describe('TerraformProjectResolverService - Nested Modules', () => {
 
       // Assert: Should detect services/api/production
       expect(result).toContain('services/api/production')
+      expect(result).not.toContain('services/web/production')
+      expect(result).toHaveLength(1)
     })
   })
 
@@ -105,6 +111,7 @@ describe('TerraformProjectResolverService - Nested Modules', () => {
 
       // Assert: Should detect services/platform/production
       expect(result).toContain('services/platform/production')
+      expect(result).toHaveLength(1)
     })
   })
 })
