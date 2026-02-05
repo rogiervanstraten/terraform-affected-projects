@@ -6,9 +6,12 @@ module dependencies and changed files.
 ## Features
 
 - **Path-aware dependency resolution** - Correctly resolves Terraform module
-  references across complex directory structures
+  references across complex directory structures, including nested modules
 - **Multiple monorepo patterns** - Supports various organizational patterns
   (shared modules, multi-environment, multi-domain, multi-account)
+- **Nested module support** - Detects changes in nested modules (e.g.,
+  `modules/rds/postgres/modules/database`) and bubbles up to parent module
+  references
 - **Git-based or manual file input** - Auto-detect changes via Git diff or
   provide files manually
 - **Glob pattern filtering** - Include/exclude files using glob patterns
@@ -122,6 +125,20 @@ services/platform/prod/
 
 **Result**: `services/platform/prod` is affected (transitive dependency
 resolution)
+
+**Scenario 4: Nested Modules**
+
+```
+modules/rds/postgres/
+  main.tf          # References ./modules/database
+  modules/database/
+    main.tf        # ← Changed
+services/api/production/
+  main.tf          # References modules/rds/postgres
+```
+
+**Result**: `services/api/production` is affected (nested module changes bubble
+up to parent module references)
 
 ## Supported Monorepo Patterns
 
