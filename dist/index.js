@@ -29510,20 +29510,6 @@ class FileChangeDetectorService {
     }
 }
 
-/**
- * Dependency Resolver Telemetry
- *
- * Provides observability into the Terraform dependency resolution process.
- * Tracks:
- * - What directories were discovered
- * - How dependencies were resolved
- * - The traversal path through the dependency graph
- *
- * This is useful for:
- * - Debugging why certain projects are included
- * - Understanding the dependency chain
- * - Performance analysis
- */
 class DependencyResolverTelemetry {
     steps = [];
     startTime;
@@ -29531,29 +29517,15 @@ class DependencyResolverTelemetry {
     constructor() {
         this.startTime = Date.now();
     }
-    /**
-     * Record initial discovered directories from changed files
-     */
     recordDiscovered(paths) {
         this.recordStep('discovered', paths);
     }
-    /**
-     * Record when a module dependency is found
-     * (e.g., a change in modules/ directory triggers finding usages)
-     */
     recordModuleDependency(paths) {
         this.recordStep('module_dependency', paths);
     }
-    /**
-     * Record when a project dependency is found
-     * (e.g., a change in /module directory resolves to parent projects)
-     */
     recordProjectDependency(paths) {
         this.recordStep('project_dependency', paths);
     }
-    /**
-     * Record a direct project change (no dependency lookup needed)
-     */
     recordDirectProject(path) {
         this.recordStep('direct_project', [path]);
     }
@@ -29569,9 +29541,6 @@ class DependencyResolverTelemetry {
             timestamp: Date.now() - this.startTime
         });
     }
-    /**
-     * Get a summary of the resolution process
-     */
     getSummary() {
         const byAction = this.steps.reduce((acc, step) => {
             acc[step.action] = (acc[step.action] || 0) + step.paths.length;
@@ -29584,15 +29553,9 @@ class DependencyResolverTelemetry {
             byAction
         };
     }
-    /**
-     * Get detailed trace of resolution steps
-     */
     getTrace() {
         return [...this.steps];
     }
-    /**
-     * Output telemetry to GitHub Actions debug logs
-     */
     outputToDebugLogs() {
         if (!this.steps.length) {
             coreExports.debug('No dependency resolution steps recorded');
@@ -29617,10 +29580,6 @@ class DependencyResolverTelemetry {
         });
         coreExports.endGroup();
     }
-    /**
-     * Get a simplified dependency chain for a specific project
-     * Shows how we determined a project was affected
-     */
     getDependencyChain(targetPath) {
         const chain = [];
         for (const step of this.steps) {
@@ -29816,6 +29775,5 @@ async function run() {
     }
 }
 
-/* istanbul ignore next */
 run();
 //# sourceMappingURL=index.js.map

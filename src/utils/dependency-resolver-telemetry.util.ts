@@ -1,9 +1,5 @@
 import * as core from '@actions/core'
 
-/**
- * Tracks the step-by-step resolution of dependencies
- * Used for debugging and understanding how the resolver traverses the dependency graph
- */
 interface ResolutionStep {
   step: number
   action:
@@ -15,20 +11,6 @@ interface ResolutionStep {
   timestamp: number
 }
 
-/**
- * Dependency Resolver Telemetry
- *
- * Provides observability into the Terraform dependency resolution process.
- * Tracks:
- * - What directories were discovered
- * - How dependencies were resolved
- * - The traversal path through the dependency graph
- *
- * This is useful for:
- * - Debugging why certain projects are included
- * - Understanding the dependency chain
- * - Performance analysis
- */
 export class DependencyResolverTelemetry {
   private steps: ResolutionStep[] = []
   private startTime: number
@@ -38,32 +20,18 @@ export class DependencyResolverTelemetry {
     this.startTime = Date.now()
   }
 
-  /**
-   * Record initial discovered directories from changed files
-   */
   recordDiscovered(paths: string | string[]): void {
     this.recordStep('discovered', paths)
   }
 
-  /**
-   * Record when a module dependency is found
-   * (e.g., a change in modules/ directory triggers finding usages)
-   */
   recordModuleDependency(paths: string | string[]): void {
     this.recordStep('module_dependency', paths)
   }
 
-  /**
-   * Record when a project dependency is found
-   * (e.g., a change in /module directory resolves to parent projects)
-   */
   recordProjectDependency(paths: string | string[]): void {
     this.recordStep('project_dependency', paths)
   }
 
-  /**
-   * Record a direct project change (no dependency lookup needed)
-   */
   recordDirectProject(path: string): void {
     this.recordStep('direct_project', [path])
   }
@@ -85,9 +53,6 @@ export class DependencyResolverTelemetry {
     })
   }
 
-  /**
-   * Get a summary of the resolution process
-   */
   getSummary(): {
     totalSteps: number
     totalPaths: number
@@ -110,16 +75,10 @@ export class DependencyResolverTelemetry {
     }
   }
 
-  /**
-   * Get detailed trace of resolution steps
-   */
   getTrace(): ResolutionStep[] {
     return [...this.steps]
   }
 
-  /**
-   * Output telemetry to GitHub Actions debug logs
-   */
   outputToDebugLogs(): void {
     if (!this.steps.length) {
       core.debug('No dependency resolution steps recorded')
@@ -154,10 +113,6 @@ export class DependencyResolverTelemetry {
     core.endGroup()
   }
 
-  /**
-   * Get a simplified dependency chain for a specific project
-   * Shows how we determined a project was affected
-   */
   getDependencyChain(targetPath: string): string[] {
     const chain: string[] = []
 
