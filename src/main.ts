@@ -19,37 +19,59 @@ export async function run(): Promise<void> {
     let baseRef: string = core.getInput('base-ref', { required: false })
     let headRef: string = core.getInput('head-ref', { required: false })
 
-    if (
-      !baseRef &&
-      !headRef &&
-      process.env.GITHUB_EVENT_NAME === 'pull_request'
-    ) {
-      try {
-        const event = process.env.GITHUB_EVENT_PATH
-        if (event) {
-          const fs = await import('node:fs')
-          const eventData = JSON.parse(fs.readFileSync(event, 'utf8'))
+    if (!baseRef && !headRef) {
+      const eventName = process.env.GITHUB_EVENT_NAME
+      const eventPath = process.env.GITHUB_EVENT_PATH
 
-          if (eventData.pull_request) {
-            baseRef = eventData.pull_request.base.sha
-            headRef = eventData.pull_request.head.sha || 'HEAD'
-            core.info(`Using PR SHAs - base: ${baseRef}, head: ${headRef}`)
+      if (eventName === 'pull_request') {
+        try {
+          if (eventPath) {
+            const fs = await import('node:fs')
+            const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'))
+
+            if (eventData.pull_request) {
+              baseRef = eventData.pull_request.base.sha
+              headRef = eventData.pull_request.head.sha || 'HEAD'
+              core.info(`Using PR SHAs - base: ${baseRef}, head: ${headRef}`)
+            } else {
+              throw new Error('No pull_request data in event')
+            }
           } else {
-            throw new Error('No pull_request data in event')
+            throw new Error('No GITHUB_EVENT_PATH')
           }
-        } else {
-          throw new Error('No GITHUB_EVENT_PATH')
+        } catch (error) {
+          core.debug(`Failed to parse PR event data: ${error}`)
+          core.info('Falling back to environment variables')
+
+          const baseBranch = process.env.GITHUB_BASE_REF || 'main'
+
+          baseRef = `remotes/origin/${baseBranch}`
+          headRef = 'HEAD'
+
+          core.info(`Using branch refs - base: ${baseRef}, head: ${headRef}`)
         }
-      } catch (error) {
-        core.debug(`Failed to parse PR event data: ${error}`)
-        core.info('Falling back to environment variables')
+      } else if (eventName === 'push') {
+        try {
+          if (eventPath) {
+            const fs = await import('node:fs')
+            const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'))
 
-        const baseBranch = process.env.GITHUB_BASE_REF || 'main'
+            const before = eventData.before
+            const after = eventData.after
 
-        baseRef = `remotes/origin/${baseBranch}`
-        headRef = 'HEAD'
-
-        core.info(`Using branch refs - base: ${baseRef}, head: ${headRef}`)
+            if (
+              after &&
+              before &&
+              before !== '0000000000000000000000000000000000000000'
+            ) {
+              baseRef = before
+              headRef = after
+              core.info(`Using push SHAs - base: ${baseRef}, head: ${headRef}`)
+            }
+          }
+        } catch (error) {
+          core.debug(`Failed to parse push event data: ${error}`)
+        }
       }
     }
 

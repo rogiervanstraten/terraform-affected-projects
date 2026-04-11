@@ -30,23 +30,6 @@ describe('FilesystemAdapter - Integration Test', () => {
     expect(files).not.toContain('README.md')
   })
 
-  it('should search for text in file contents', async () => {
-    await repo.writeFile(
-      'main.tf',
-      TerraformTemplates.module('../modules/database', 'db')
-    )
-    await repo.writeFile(
-      'vpc.tf',
-      TerraformTemplates.resource('aws_vpc', 'main')
-    )
-    await repo.writeFile('outputs.tf', TerraformTemplates.output('db_endpoint'))
-
-    const files = await adapter.searchFileContents('database')
-
-    expect(files).toContain('main.tf')
-    expect(files).not.toContain('vpc.tf')
-  })
-
   it('should read file contents', async () => {
     const content = TerraformTemplates.provider('aws')
     await repo.writeFile('provider.tf', content)

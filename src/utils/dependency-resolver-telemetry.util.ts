@@ -154,20 +154,4 @@ export class DependencyResolverTelemetry {
     core.endGroup()
   }
 
-  /**
-   * Get a simplified dependency chain for a specific project
-   * Shows how we determined a project was affected
-   */
-  getDependencyChain(targetPath: string): string[] {
-    const chain: string[] = []
-
-    for (const step of this.steps) {
-      if (step.paths.includes(targetPath)) {
-        chain.push(`${step.action}: ${targetPath}`)
-        break
-      }
-    }
-
-    return chain
-  }
 }

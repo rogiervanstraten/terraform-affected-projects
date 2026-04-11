@@ -29,48 +29,10 @@ export class MockFilesystemAdapter implements FilesystemPort {
     })
   }
 
-  async searchFileContents(
-    searchText: string,
-    filePattern?: string,
-    wordMatch: boolean = false
-  ): Promise<string[]> {
-    let filesToSearch = Object.keys(this.files)
-
-    if (filePattern) {
-      filesToSearch = filesToSearch.filter((file) =>
-        minimatch(file, filePattern, { dot: true })
-      )
-    }
-
-    const matchingFiles: string[] = []
-
-    for (const file of filesToSearch) {
-      const content = this.files[file]
-
-      let matches = false
-      if (wordMatch) {
-        const regex = new RegExp(`\\b${this.escapeRegex(searchText)}\\b`, 'g')
-        matches = regex.test(content)
-      } else {
-        matches = content.includes(searchText)
-      }
-
-      if (matches) {
-        matchingFiles.push(file)
-      }
-    }
-
-    return matchingFiles
-  }
-
   async readFile(filePath: string): Promise<string> {
     if (!(filePath in this.files)) {
       throw new Error(`File not found: ${filePath}`)
     }
     return this.files[filePath]
-  }
-
-  private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 }

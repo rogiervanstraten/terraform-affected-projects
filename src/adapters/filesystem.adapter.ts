@@ -64,52 +64,8 @@ export class FilesystemAdapter implements FilesystemPort {
     })
   }
 
-  async searchFileContents(
-    searchText: string,
-    filePattern?: string,
-    wordMatch: boolean = false
-  ): Promise<string[]> {
-    const allFiles = await this.walkDirectory(this.baseDir, [
-      'node_modules',
-      '.git',
-      'dist'
-    ])
-
-    const filesToSearch = filePattern
-      ? allFiles.filter((file) => minimatch(file, filePattern, { dot: true }))
-      : allFiles
-
-    const matchingFiles: string[] = []
-
-    for (const file of filesToSearch) {
-      try {
-        const content = await this.readFile(file)
-
-        let matches = false
-        if (wordMatch) {
-          const regex = new RegExp(`\\b${this.escapeRegex(searchText)}\\b`, 'g')
-          matches = regex.test(content)
-        } else {
-          matches = content.includes(searchText)
-        }
-
-        if (matches) {
-          matchingFiles.push(file)
-        }
-      } catch {
-        continue
-      }
-    }
-
-    return matchingFiles
-  }
-
   async readFile(filePath: string): Promise<string> {
     const fullPath = join(this.baseDir, filePath)
     return readFile(fullPath, 'utf-8')
-  }
-
-  private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 }

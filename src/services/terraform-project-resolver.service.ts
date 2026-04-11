@@ -30,6 +30,10 @@ export class TerraformProjectResolverService {
         for (const match of matches) {
           const sourcePath = match[1]
 
+          if (!sourcePath.startsWith('./') && !sourcePath.startsWith('../')) {
+            continue
+          }
+
           const resolvedSourcePath = path.resolve(fileDir, sourcePath)
           const resolvedModulePath = path.resolve(modulePath)
 
@@ -46,12 +50,6 @@ export class TerraformProjectResolverService {
     return referencingFiles
   }
 
-  private async findFilesUsingModulePath(
-    modulePath: string
-  ): Promise<string[]> {
-    return await this.findFilesReferencingModule(modulePath)
-  }
-
   private async findAllProjects(): Promise<string[]> {
     const providerFiles = await this.filesystem.findFiles('provider.tf', [
       '*/module/*',
@@ -61,28 +59,12 @@ export class TerraformProjectResolverService {
     return providerFiles.map((file) => path.dirname(file))
   }
 
-  private categorizeDirectory(dirPath: string): {
-    type: 'shared-module' | 'project-module' | 'project' | 'other'
-    hasProvider: boolean
-  } {
-    const isInSharedModules = dirPath.includes('modules/')
-    const isProjectModule = dirPath.includes('/module') && !isInSharedModules
-    const parts = dirPath.split('/')
-    const isLikelyProject =
-      parts.includes('production') ||
-      parts.includes('staging') ||
-      parts.includes('development')
-
-    return {
-      type: isInSharedModules
-        ? 'shared-module'
-        : isProjectModule
-          ? 'project-module'
-          : isLikelyProject
-            ? 'project'
-            : 'other',
-      hasProvider: false
-    }
+  private categorizeDirectory(
+    dirPath: string
+  ): 'shared-module' | 'project-module' | 'direct' {
+    if (dirPath.includes('modules/')) return 'shared-module'
+    if (dirPath.includes('/module')) return 'project-module'
+    return 'direct'
   }
 
   async resolveAffectedProjects(
@@ -112,7 +94,8 @@ export class TerraformProjectResolverService {
       processedDirs.add(currentPath)
 
       if (currentPath === '.' && resolveRoot) {
-        return await this.findAllProjects()
+        const allProjects = await this.findAllProjects()
+        return Array.from(new Set([...projectDirectories, ...allProjects]))
       }
 
       if (!currentPath || ignoredPaths.includes(currentPath)) {
@@ -121,10 +104,10 @@ export class TerraformProjectResolverService {
 
       const category = this.categorizeDirectory(currentPath)
 
-      switch (category.type) {
+      switch (category) {
         case 'shared-module': {
           const dependentFiles =
-            await this.findFilesUsingModulePath(currentPath)
+            await this.findFilesReferencingModule(currentPath)
           const dependentDirs = Array.from(
             new Set(dependentFiles.map((f) => path.dirname(f)))
           )
@@ -148,8 +131,6 @@ export class TerraformProjectResolverService {
           break
         }
 
-        case 'project':
-        case 'other':
         default: {
           telemetry.recordDirectProject(currentPath)
           projectDirectories.push(currentPath)
