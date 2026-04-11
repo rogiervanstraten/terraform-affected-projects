@@ -40176,12 +40176,12 @@ class TerraformProjectResolverService {
         }
         return referencingFiles;
     }
-    async findAllProjects() {
-        const providerFiles = await this.filesystem.findFiles('provider.tf', [
+    async findAllProjects(projectMarker) {
+        const markerFiles = await this.filesystem.findFiles(projectMarker, [
             '*/module/*',
             '*/modules/*'
         ]);
-        return providerFiles.map((file) => path$1.dirname(file));
+        return markerFiles.map((file) => path$1.dirname(file));
     }
     categorizeDirectory(dirPath) {
         if (dirPath.includes('modules/'))
@@ -40191,7 +40191,7 @@ class TerraformProjectResolverService {
         return 'direct';
     }
     async resolveAffectedProjects(changedFiles, config = {}) {
-        const { resolveRoot = false, ignoredPaths = ['.'] } = config;
+        const { resolveRoot = false, ignoredPaths = ['.'], projectMarker = 'provider.tf' } = config;
         const telemetry = new DependencyResolverTelemetry();
         const projectDirectories = [];
         const processedDirs = new Set();
@@ -40205,7 +40205,7 @@ class TerraformProjectResolverService {
             }
             processedDirs.add(currentPath);
             if (currentPath === '.' && resolveRoot) {
-                const allProjects = await this.findAllProjects();
+                const allProjects = await this.findAllProjects(projectMarker);
                 return Array.from(new Set([...projectDirectories, ...allProjects]));
             }
             if (!currentPath || ignoredPaths.includes(currentPath)) {
@@ -40304,6 +40304,9 @@ async function run() {
         const filesIgnorePatterns = getMultilineInput('files-ignore', { required: false });
         const resolveRootInput = getBooleanInput('resolve-root');
         const ignorePathsInput = getMultilineInput('ignore-paths');
+        const projectMarkerInput = getInput('project-marker', {
+            required: false
+        });
         const gitAdapter = new GitAdapter();
         const fileFilterAdapter = new FileFilterAdapter();
         const filesystemAdapter = new FilesystemAdapter();
@@ -40319,7 +40322,8 @@ async function run() {
         info(`After filtering: ${changedFiles.length} files`);
         const changedDirectories = await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
             resolveRoot: resolveRootInput,
-            ignoredPaths: ignorePathsInput
+            ignoredPaths: ignorePathsInput,
+            projectMarker: projectMarkerInput || undefined
         });
         info(`Found ${changedDirectories.length} affected project(s)`);
         if (changedDirectories.length > 0) {

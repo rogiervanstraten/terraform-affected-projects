@@ -5,6 +5,7 @@ import { DependencyResolverTelemetry } from '../utils/dependency-resolver-teleme
 export interface TerraformProjectResolverConfig {
   resolveRoot?: boolean
   ignoredPaths?: string[]
+  projectMarker?: string
 }
 
 export class TerraformProjectResolverService {
@@ -50,13 +51,13 @@ export class TerraformProjectResolverService {
     return referencingFiles
   }
 
-  private async findAllProjects(): Promise<string[]> {
-    const providerFiles = await this.filesystem.findFiles('provider.tf', [
+  private async findAllProjects(projectMarker: string): Promise<string[]> {
+    const markerFiles = await this.filesystem.findFiles(projectMarker, [
       '*/module/*',
       '*/modules/*'
     ])
 
-    return providerFiles.map((file) => path.dirname(file))
+    return markerFiles.map((file) => path.dirname(file))
   }
 
   private categorizeDirectory(
@@ -71,7 +72,11 @@ export class TerraformProjectResolverService {
     changedFiles: string[],
     config: TerraformProjectResolverConfig = {}
   ): Promise<string[]> {
-    const { resolveRoot = false, ignoredPaths = ['.'] } = config
+    const {
+      resolveRoot = false,
+      ignoredPaths = ['.'],
+      projectMarker = 'provider.tf'
+    } = config
 
     const telemetry = new DependencyResolverTelemetry()
     const projectDirectories: string[] = []
@@ -94,7 +99,7 @@ export class TerraformProjectResolverService {
       processedDirs.add(currentPath)
 
       if (currentPath === '.' && resolveRoot) {
-        const allProjects = await this.findAllProjects()
+        const allProjects = await this.findAllProjects(projectMarker)
         return Array.from(new Set([...projectDirectories, ...allProjects]))
       }
 

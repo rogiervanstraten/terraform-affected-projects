@@ -55,6 +55,15 @@ inputs:
       'Should projects be resolved from changes to files in the root directory?'
     required: false
     default: 'false'
+  project-marker:
+    description: >
+      The filename used to identify a directory as a Terraform project root. Any
+      directory containing this file (outside of module paths) is treated as a
+      deployable project. Defaults to 'provider.tf', which is the conventional
+      file for declaring Terraform providers. Change this if your projects use a
+      different convention (e.g. 'versions.tf' or 'main.tf').
+    required: false
+    default: provider.tf
   ignore-paths:
     description: 'A list of paths to ignore'
     required: false

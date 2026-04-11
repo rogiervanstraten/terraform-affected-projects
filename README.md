@@ -14,25 +14,60 @@ module dependencies and changed files.
 - **Glob pattern filtering** - Include/exclude files using glob patterns
 - **Security-hardened** - No shell injection vulnerabilities, input sanitization
 
+## How Projects Are Identified
+
+> **This is the most important concept to understand before using this action.**
+
+A directory is treated as a **Terraform project root** when it contains the file
+specified by `project-marker` (default: `provider.tf`). This file is what the
+action uses to discover all deployable projects in your repository —
+particularly when using `resolve-root: true`.
+
+If your monorepo uses a different convention, set `project-marker` accordingly:
+
+| Convention                                   | `project-marker` value |
+| -------------------------------------------- | ---------------------- |
+| Provider declared in `provider.tf` (default) | `provider.tf`          |
+| Provider + versions in `versions.tf`         | `versions.tf`          |
+| Everything in one file                       | `main.tf`              |
+| Backend config as the marker                 | `backend.tf`           |
+
+**Example:** if your projects look like this:
+
+```
+services/api/prod/
+  backend.tf    ← marker file
+  main.tf
+  variables.tf
+```
+
+Set `project-marker: backend.tf` so the action knows `services/api/prod/` is a
+project root.
+
 ## Usage
 
 ```yaml
 - name: Detect affected Terraform projects
   uses: rogiervanstraten/terraform-affected-projects@v1
   with:
+    # IMPORTANT: The file that marks a directory as a Terraform project root.
+    # Defaults to 'provider.tf'. Change if your projects use a different
+    # convention (e.g. 'versions.tf', 'main.tf', 'backend.tf').
+    project-marker: provider.tf
+
     # Optional: Provide changed files manually (if not provided, auto-detected via git)
     changed-files: |
       modules/vpc/main.tf
       services/api/production/main.tf
 
-    # Optional: Git references for diff (defaults to HEAD^ and HEAD)
+    # Optional: Git references for diff (auto-detected for pull_request and push events)
     base-ref: 'main'
     head-ref: 'HEAD'
 
     # Optional: Include only specific file patterns
     files: |
-      **.tf
-      **.tfvars
+      **/*.tf
+      **/*.tfvars
 
     # Optional: Exclude file patterns
     files-ignore: |
@@ -61,8 +96,7 @@ module dependencies and changed files.
   uses: rogiervanstraten/terraform-affected-projects@v1
 
 - name: Show affected projects
-  run: |
-    echo "Affected projects: ${{ steps.affected.outputs.changed-directories }}"
+  run: echo "Affected projects: ${{ steps.affected.outputs.changed-directories }}"
 ```
 
 ## Why This Action?

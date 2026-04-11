@@ -84,6 +84,9 @@ export async function run(): Promise<void> {
     )
     const resolveRootInput: boolean = core.getBooleanInput('resolve-root')
     const ignorePathsInput: string[] = core.getMultilineInput('ignore-paths')
+    const projectMarkerInput: string = core.getInput('project-marker', {
+      required: false
+    })
 
     const gitAdapter = new GitAdapter()
     const fileFilterAdapter = new FileFilterAdapter()
@@ -113,7 +116,8 @@ export async function run(): Promise<void> {
     const changedDirectories =
       await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
         resolveRoot: resolveRootInput,
-        ignoredPaths: ignorePathsInput
+        ignoredPaths: ignorePathsInput,
+        projectMarker: projectMarkerInput || undefined
       })
 
     core.info(`Found ${changedDirectories.length} affected project(s)`)
