@@ -69,5 +69,5 @@ outputs:
     description: A list of changed directories
 
 runs:
-  using: node20
+  using: node24
   main: dist/index.js
