@@ -153,5 +153,4 @@ export class DependencyResolverTelemetry {
 
     core.endGroup()
   }
-
 }
