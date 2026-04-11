@@ -1,7 +1,7 @@
 {
   "name": "terraform-affected-projects",
   "description": "GitHub Action to detect affected Terraform projects in monorepos based on module dependencies",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "author": "Rogier van Straten <rogier@from89.com>",
   "type": "module",
   "private": true,
