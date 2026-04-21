@@ -4,135 +4,101 @@ import { FileFilterAdapter } from './adapters/file-filter.adapter.js'
 import { FilesystemAdapter } from './adapters/filesystem.adapter.js'
 import { FileChangeDetectorService } from './services/file-change-detector.service.js'
 import { TerraformProjectResolverService } from './services/terraform-project-resolver.service.js'
+import { resolveGitRefs, type GitRefs } from './git-refs.js'
+
+interface ActionInputs {
+  changedFiles: string[]
+  baseRef: string
+  headRef: string
+  filesPatterns: string[]
+  filesIgnorePatterns: string[]
+  resolveRoot: boolean
+  allProjects: boolean
+  ignoredPaths: string[]
+  projectMarker: string
+}
+
+function readInputs(): ActionInputs {
+  return {
+    changedFiles: core.getMultilineInput('changed-files', { required: false }),
+    baseRef: core.getInput('base-ref', { required: false }),
+    headRef: core.getInput('head-ref', { required: false }),
+    filesPatterns: core.getMultilineInput('files', { required: false }),
+    filesIgnorePatterns: core.getMultilineInput('files-ignore', {
+      required: false
+    }),
+    resolveRoot: core.getBooleanInput('resolve-root'),
+    allProjects: core.getBooleanInput('all-projects'),
+    ignoredPaths: core.getMultilineInput('ignore-paths'),
+    projectMarker: core.getInput('project-marker', { required: false })
+  }
+}
+
+async function collectChangedFiles(
+  inputs: ActionInputs,
+  refs: GitRefs,
+  detector: FileChangeDetectorService,
+  filter: FileFilterAdapter
+): Promise<string[]> {
+  if (inputs.allProjects) {
+    core.info('all-projects is enabled, resolving all Terraform projects')
+    return []
+  }
+
+  const detected = await detector.detectChangedFiles({
+    files: inputs.changedFiles.length > 0 ? inputs.changedFiles : undefined,
+    base: refs.base || undefined,
+    head: refs.head || undefined
+  })
+  core.info(`Detected ${detected.length} changed files`)
+
+  const filtered = filter.filter(
+    detected,
+    inputs.filesPatterns,
+    inputs.filesIgnorePatterns
+  )
+  core.info(`After filtering: ${filtered.length} files`)
+  return filtered
+}
 
 export async function run(): Promise<void> {
   try {
     core.info('Starting terraform-affected-projects action')
 
-    const changedFilesInput: string[] = core.getMultilineInput(
-      'changed-files',
+    const inputs = readInputs()
+    const refs = await resolveGitRefs({
+      base: inputs.baseRef,
+      head: inputs.headRef
+    })
+
+    const detector = new FileChangeDetectorService(new GitAdapter())
+    const fileFilter = new FileFilterAdapter()
+    const resolver = new TerraformProjectResolverService(
+      new FilesystemAdapter()
+    )
+
+    const changedFiles = await collectChangedFiles(
+      inputs,
+      refs,
+      detector,
+      fileFilter
+    )
+
+    const affectedProjects = await resolver.resolveAffectedProjects(
+      changedFiles,
       {
-        required: false
+        allProjects: inputs.allProjects,
+        resolveRoot: inputs.resolveRoot,
+        ignoredPaths: inputs.ignoredPaths,
+        projectMarker: inputs.projectMarker || undefined
       }
     )
 
-    let baseRef: string = core.getInput('base-ref', { required: false })
-    let headRef: string = core.getInput('head-ref', { required: false })
-
-    if (!baseRef && !headRef) {
-      const eventName = process.env.GITHUB_EVENT_NAME
-      const eventPath = process.env.GITHUB_EVENT_PATH
-
-      if (eventName === 'pull_request') {
-        try {
-          if (eventPath) {
-            const fs = await import('node:fs')
-            const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'))
-
-            if (eventData.pull_request) {
-              baseRef = eventData.pull_request.base.sha
-              headRef = eventData.pull_request.head.sha || 'HEAD'
-              core.info(`Using PR SHAs - base: ${baseRef}, head: ${headRef}`)
-            } else {
-              throw new Error('No pull_request data in event')
-            }
-          } else {
-            throw new Error('No GITHUB_EVENT_PATH')
-          }
-        } catch (error) {
-          core.debug(`Failed to parse PR event data: ${error}`)
-          core.info('Falling back to environment variables')
-
-          const baseBranch = process.env.GITHUB_BASE_REF || 'main'
-
-          baseRef = `remotes/origin/${baseBranch}`
-          headRef = 'HEAD'
-
-          core.info(`Using branch refs - base: ${baseRef}, head: ${headRef}`)
-        }
-      } else if (eventName === 'push') {
-        try {
-          if (eventPath) {
-            const fs = await import('node:fs')
-            const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'))
-
-            const before = eventData.before
-            const after = eventData.after
-
-            if (
-              after &&
-              before &&
-              before !== '0000000000000000000000000000000000000000'
-            ) {
-              baseRef = before
-              headRef = after
-              core.info(`Using push SHAs - base: ${baseRef}, head: ${headRef}`)
-            }
-          }
-        } catch (error) {
-          core.debug(`Failed to parse push event data: ${error}`)
-        }
-      }
+    core.info(`Found ${affectedProjects.length} affected project(s)`)
+    if (affectedProjects.length > 0) {
+      core.info(`Affected directories: ${affectedProjects.join(', ')}`)
     }
-
-    const filesPatterns: string[] = core.getMultilineInput('files', {
-      required: false
-    })
-    const filesIgnorePatterns: string[] = core.getMultilineInput(
-      'files-ignore',
-      { required: false }
-    )
-    const resolveRootInput: boolean = core.getBooleanInput('resolve-root')
-    const allProjectsInput: boolean = core.getBooleanInput('all-projects')
-    const ignorePathsInput: string[] = core.getMultilineInput('ignore-paths')
-    const projectMarkerInput: string = core.getInput('project-marker', {
-      required: false
-    })
-
-    const gitAdapter = new GitAdapter()
-    const fileFilterAdapter = new FileFilterAdapter()
-    const filesystemAdapter = new FilesystemAdapter()
-
-    const fileChangeDetector = new FileChangeDetectorService(gitAdapter)
-    const terraformProjectResolver = new TerraformProjectResolverService(
-      filesystemAdapter
-    )
-
-    let changedFiles: string[] = []
-
-    if (allProjectsInput) {
-      core.info('all-projects is enabled, resolving all Terraform projects')
-    } else {
-      changedFiles = await fileChangeDetector.detectChangedFiles({
-        files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
-        base: baseRef || undefined,
-        head: headRef || undefined
-      })
-
-      core.info(`Detected ${changedFiles.length} changed files`)
-
-      changedFiles = fileFilterAdapter.filter(
-        changedFiles,
-        filesPatterns,
-        filesIgnorePatterns
-      )
-
-      core.info(`After filtering: ${changedFiles.length} files`)
-    }
-
-    const changedDirectories =
-      await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
-        allProjects: allProjectsInput,
-        resolveRoot: resolveRootInput,
-        ignoredPaths: ignorePathsInput,
-        projectMarker: projectMarkerInput || undefined
-      })
-
-    core.info(`Found ${changedDirectories.length} affected project(s)`)
-    if (changedDirectories.length > 0) {
-      core.info(`Affected directories: ${changedDirectories.join(', ')}`)
-    }
-    core.setOutput('changed-directories', JSON.stringify(changedDirectories))
+    core.setOutput('changed-directories', JSON.stringify(affectedProjects))
   } catch (error) {
     if (error instanceof Error) core.setFailed(error.message)
   }

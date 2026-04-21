@@ -1,6 +1,6 @@
 import path from 'node:path'
+import * as core from '@actions/core'
 import type { FilesystemPort } from '../ports/filesystem.port.js'
-import { DependencyResolverTelemetry } from '../utils/dependency-resolver-telemetry.util.js'
 
 export interface TerraformProjectResolverConfig {
   allProjects?: boolean
@@ -84,7 +84,6 @@ export class TerraformProjectResolverService {
       return this.findAllProjects(projectMarker)
     }
 
-    const telemetry = new DependencyResolverTelemetry()
     const projectDirectories: string[] = []
     const processedDirs = new Set<string>()
 
@@ -92,7 +91,9 @@ export class TerraformProjectResolverService {
       new Set(changedFiles.map((file) => path.dirname(file)))
     )
 
-    telemetry.recordDiscovered(changedDirectories)
+    core.debug(
+      `Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`
+    )
 
     const stack = [...changedDirectories]
 
@@ -123,7 +124,9 @@ export class TerraformProjectResolverService {
             new Set(dependentFiles.map((f) => path.dirname(f)))
           )
 
-          telemetry.recordModuleDependency(dependentDirs)
+          core.debug(
+            `Shared module ${currentPath} → ${dependentDirs.length} dependent dir(s): ${dependentDirs.join(', ')}`
+          )
 
           stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)))
           break
@@ -136,21 +139,21 @@ export class TerraformProjectResolverService {
             new Set(referencingFiles.map((f) => path.dirname(f)))
           )
 
-          telemetry.recordProjectDependency(referencingDirs)
+          core.debug(
+            `Project module ${currentPath} → ${referencingDirs.length} referencing project(s): ${referencingDirs.join(', ')}`
+          )
 
           projectDirectories.push(...referencingDirs)
           break
         }
 
         default: {
-          telemetry.recordDirectProject(currentPath)
+          core.debug(`Direct project: ${currentPath}`)
           projectDirectories.push(currentPath)
           break
         }
       }
     }
-
-    telemetry.outputToDebugLogs()
 
     return Array.from(new Set(projectDirectories))
   }
