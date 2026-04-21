@@ -40007,7 +40007,8 @@ class FilesystemAdapter {
         const allFiles = await this.walkDirectory(this.baseDir, allExcludes);
         return allFiles.filter((file) => {
             const fileName = file.split('/').pop() || '';
-            return fileName === pattern || minimatch(file, pattern, { dot: true });
+            return (fileName === pattern ||
+                minimatch(file, pattern, { dot: true, matchBase: true }));
         });
     }
     async readFile(filePath) {

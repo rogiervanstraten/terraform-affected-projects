@@ -60,7 +60,10 @@ export class FilesystemAdapter implements FilesystemPort {
 
     return allFiles.filter((file) => {
       const fileName = file.split('/').pop() || ''
-      return fileName === pattern || minimatch(file, pattern, { dot: true })
+      return (
+        fileName === pattern ||
+        minimatch(file, pattern, { dot: true, matchBase: true })
+      )
     })
   }
 
