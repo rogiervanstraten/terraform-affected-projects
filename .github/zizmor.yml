@@ -1,0 +1,8 @@
+rules:
+  artipacked:
+    ignore:
+      # Licensed workflow commits license cache updates back to the repo via
+      # `git push` on workflow_dispatch, which requires persisted credentials.
+      # No artifact uploads occur in this workflow, so the credential-leak
+      # vector artipacked protects against does not apply.
+      - licensed.yml
