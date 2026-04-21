@@ -62,7 +62,7 @@
     "eslint-plugin-prettier": "^5.5.5",
     "make-coverage-badge": "^1.2.0",
     "prettier": "^3.8.3",
-    "prettier-eslint": "^16.4.2",
+    "prettier-eslint": "^16.3.0",
     "rollup": "^4.60.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.4"

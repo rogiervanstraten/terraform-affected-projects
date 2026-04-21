@@ -111,9 +111,6 @@ function issueCommand(command, properties, message) {
     const cmd = new Command(command, properties, message);
     process.stdout.write(cmd.toString() + os.EOL);
 }
-function issue(name, message = '') {
-    issueCommand(name, {}, message);
-}
 const CMD_STRING = '::';
 class Command {
     constructor(command, properties, message) {
@@ -37434,22 +37431,6 @@ function warning(message, properties = {}) {
 function info(message) {
     process.stdout.write(message + os.EOL);
 }
-/**
- * Begin an output group.
- *
- * Output until the next `groupEnd` will be foldable in this group
- *
- * @param name The name of the output group
- */
-function startGroup(name) {
-    issue('group', name);
-}
-/**
- * End an output group.
- */
-function endGroup() {
-    issue('endgroup');
-}
 
 class GitAdapter {
     sanitizeRef(ref) {
@@ -40033,115 +40014,6 @@ class FileChangeDetectorService {
     }
 }
 
-/**
- * Dependency Resolver Telemetry
- *
- * Provides observability into the Terraform dependency resolution process.
- * Tracks:
- * - What directories were discovered
- * - How dependencies were resolved
- * - The traversal path through the dependency graph
- *
- * This is useful for:
- * - Debugging why certain projects are included
- * - Understanding the dependency chain
- * - Performance analysis
- */
-class DependencyResolverTelemetry {
-    steps = [];
-    startTime;
-    currentStep = 0;
-    constructor() {
-        this.startTime = Date.now();
-    }
-    /**
-     * Record initial discovered directories from changed files
-     */
-    recordDiscovered(paths) {
-        this.recordStep('discovered', paths);
-    }
-    /**
-     * Record when a module dependency is found
-     * (e.g., a change in modules/ directory triggers finding usages)
-     */
-    recordModuleDependency(paths) {
-        this.recordStep('module_dependency', paths);
-    }
-    /**
-     * Record when a project dependency is found
-     * (e.g., a change in /module directory resolves to parent projects)
-     */
-    recordProjectDependency(paths) {
-        this.recordStep('project_dependency', paths);
-    }
-    /**
-     * Record a direct project change (no dependency lookup needed)
-     */
-    recordDirectProject(path) {
-        this.recordStep('direct_project', [path]);
-    }
-    recordStep(action, paths) {
-        const pathsArray = Array.isArray(paths) ? paths : [paths];
-        if (pathsArray.length === 0)
-            return;
-        this.currentStep++;
-        this.steps.push({
-            step: this.currentStep,
-            action,
-            paths: pathsArray,
-            timestamp: Date.now() - this.startTime
-        });
-    }
-    /**
-     * Get a summary of the resolution process
-     */
-    getSummary() {
-        const byAction = this.steps.reduce((acc, step) => {
-            acc[step.action] = (acc[step.action] || 0) + step.paths.length;
-            return acc;
-        }, {});
-        return {
-            totalSteps: this.steps.length,
-            totalPaths: this.steps.reduce((sum, step) => sum + step.paths.length, 0),
-            durationMs: Date.now() - this.startTime,
-            byAction
-        };
-    }
-    /**
-     * Get detailed trace of resolution steps
-     */
-    getTrace() {
-        return [...this.steps];
-    }
-    /**
-     * Output telemetry to GitHub Actions debug logs
-     */
-    outputToDebugLogs() {
-        if (!this.steps.length) {
-            debug('No dependency resolution steps recorded');
-            return;
-        }
-        startGroup('🔍 Dependency Resolution Trace');
-        this.steps.forEach((step) => {
-            const pathsStr = step.paths.length === 1 ? step.paths[0] : `[${step.paths.length} paths]`;
-            debug(`Step ${step.step} (+${step.timestamp}ms): ${step.action} → ${pathsStr}`);
-            if (step.paths.length > 1) {
-                step.paths.forEach((p) => debug(`  - ${p}`));
-            }
-        });
-        const summary = this.getSummary();
-        debug(`\n📊 Summary:`);
-        debug(`  Total steps: ${summary.totalSteps}`);
-        debug(`  Total paths processed: ${summary.totalPaths}`);
-        debug(`  Duration: ${summary.durationMs}ms`);
-        debug(`  By action:`);
-        Object.entries(summary.byAction).forEach(([action, count]) => {
-            debug(`    ${action}: ${count}`);
-        });
-        endGroup();
-    }
-}
-
 class TerraformProjectResolverService {
     filesystem;
     constructor(filesystem) {
@@ -40196,11 +40068,10 @@ class TerraformProjectResolverService {
         if (allProjects) {
             return this.findAllProjects(projectMarker);
         }
-        const telemetry = new DependencyResolverTelemetry();
         const projectDirectories = [];
         const processedDirs = new Set();
         const changedDirectories = Array.from(new Set(changedFiles.map((file) => path$1.dirname(file))));
-        telemetry.recordDiscovered(changedDirectories);
+        debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
         const stack = [...changedDirectories];
         while (stack.length > 0) {
             const currentPath = stack.pop();
@@ -40220,128 +40091,141 @@ class TerraformProjectResolverService {
                 case 'shared-module': {
                     const dependentFiles = await this.findFilesReferencingModule(currentPath);
                     const dependentDirs = Array.from(new Set(dependentFiles.map((f) => path$1.dirname(f))));
-                    telemetry.recordModuleDependency(dependentDirs);
+                    debug(`Shared module ${currentPath} → ${dependentDirs.length} dependent dir(s): ${dependentDirs.join(', ')}`);
                     stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)));
                     break;
                 }
                 case 'project-module': {
                     const referencingFiles = await this.findFilesReferencingModule(currentPath);
                     const referencingDirs = Array.from(new Set(referencingFiles.map((f) => path$1.dirname(f))));
-                    telemetry.recordProjectDependency(referencingDirs);
+                    debug(`Project module ${currentPath} → ${referencingDirs.length} referencing project(s): ${referencingDirs.join(', ')}`);
                     projectDirectories.push(...referencingDirs);
                     break;
                 }
                 default: {
-                    telemetry.recordDirectProject(currentPath);
+                    debug(`Direct project: ${currentPath}`);
                     projectDirectories.push(currentPath);
                     break;
                 }
             }
         }
-        telemetry.outputToDebugLogs();
         return Array.from(new Set(projectDirectories));
     }
 }
 
+const ZERO_SHA = '0000000000000000000000000000000000000000';
+/**
+ * Derive base/head refs from user inputs, falling back to the GitHub event
+ * payload (pull_request or push) when neither input is provided.
+ * Returns empty strings if nothing can be determined.
+ */
+async function resolveGitRefs(inputs) {
+    if (inputs.base || inputs.head)
+        return inputs;
+    switch (process.env.GITHUB_EVENT_NAME) {
+        case 'pull_request':
+            return resolvePullRequestRefs(process.env.GITHUB_EVENT_PATH);
+        case 'push':
+            return resolvePushRefs(process.env.GITHUB_EVENT_PATH);
+        default:
+            return { base: '', head: '' };
+    }
+}
+async function resolvePullRequestRefs(eventPath) {
+    try {
+        if (!eventPath)
+            throw new Error('No GITHUB_EVENT_PATH');
+        const { readFileSync } = await import('node:fs');
+        const eventData = JSON.parse(readFileSync(eventPath, 'utf8'));
+        if (!eventData.pull_request) {
+            throw new Error('No pull_request data in event');
+        }
+        const base = eventData.pull_request.base.sha;
+        const head = eventData.pull_request.head.sha || 'HEAD';
+        info(`Using PR SHAs - base: ${base}, head: ${head}`);
+        return { base, head };
+    }
+    catch (error) {
+        debug(`Failed to parse PR event data: ${error}`);
+        info('Falling back to environment variables');
+        const baseBranch = process.env.GITHUB_BASE_REF || 'main';
+        const base = `remotes/origin/${baseBranch}`;
+        const head = 'HEAD';
+        info(`Using branch refs - base: ${base}, head: ${head}`);
+        return { base, head };
+    }
+}
+async function resolvePushRefs(eventPath) {
+    const empty = { base: '', head: '' };
+    try {
+        if (!eventPath)
+            return empty;
+        const { readFileSync } = await import('node:fs');
+        const { before, after } = JSON.parse(readFileSync(eventPath, 'utf8'));
+        if (!after || !before || before === ZERO_SHA)
+            return empty;
+        info(`Using push SHAs - base: ${before}, head: ${after}`);
+        return { base: before, head: after };
+    }
+    catch (error) {
+        debug(`Failed to parse push event data: ${error}`);
+        return empty;
+    }
+}
+
+function readInputs() {
+    return {
+        changedFiles: getMultilineInput('changed-files', { required: false }),
+        baseRef: getInput('base-ref', { required: false }),
+        headRef: getInput('head-ref', { required: false }),
+        filesPatterns: getMultilineInput('files', { required: false }),
+        filesIgnorePatterns: getMultilineInput('files-ignore', {
+            required: false
+        }),
+        resolveRoot: getBooleanInput('resolve-root'),
+        allProjects: getBooleanInput('all-projects'),
+        ignoredPaths: getMultilineInput('ignore-paths'),
+        projectMarker: getInput('project-marker', { required: false })
+    };
+}
+async function collectChangedFiles(inputs, refs, detector, filter) {
+    if (inputs.allProjects) {
+        info('all-projects is enabled, resolving all Terraform projects');
+        return [];
+    }
+    const detected = await detector.detectChangedFiles({
+        files: inputs.changedFiles.length > 0 ? inputs.changedFiles : undefined,
+        base: refs.base || undefined,
+        head: refs.head || undefined
+    });
+    info(`Detected ${detected.length} changed files`);
+    const filtered = filter.filter(detected, inputs.filesPatterns, inputs.filesIgnorePatterns);
+    info(`After filtering: ${filtered.length} files`);
+    return filtered;
+}
 async function run() {
     try {
         info('Starting terraform-affected-projects action');
-        const changedFilesInput = getMultilineInput('changed-files', {
-            required: false
+        const inputs = readInputs();
+        const refs = await resolveGitRefs({
+            base: inputs.baseRef,
+            head: inputs.headRef
         });
-        let baseRef = getInput('base-ref', { required: false });
-        let headRef = getInput('head-ref', { required: false });
-        if (!baseRef && !headRef) {
-            const eventName = process.env.GITHUB_EVENT_NAME;
-            const eventPath = process.env.GITHUB_EVENT_PATH;
-            if (eventName === 'pull_request') {
-                try {
-                    if (eventPath) {
-                        const fs = await import('node:fs');
-                        const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
-                        if (eventData.pull_request) {
-                            baseRef = eventData.pull_request.base.sha;
-                            headRef = eventData.pull_request.head.sha || 'HEAD';
-                            info(`Using PR SHAs - base: ${baseRef}, head: ${headRef}`);
-                        }
-                        else {
-                            throw new Error('No pull_request data in event');
-                        }
-                    }
-                    else {
-                        throw new Error('No GITHUB_EVENT_PATH');
-                    }
-                }
-                catch (error) {
-                    debug(`Failed to parse PR event data: ${error}`);
-                    info('Falling back to environment variables');
-                    const baseBranch = process.env.GITHUB_BASE_REF || 'main';
-                    baseRef = `remotes/origin/${baseBranch}`;
-                    headRef = 'HEAD';
-                    info(`Using branch refs - base: ${baseRef}, head: ${headRef}`);
-                }
-            }
-            else if (eventName === 'push') {
-                try {
-                    if (eventPath) {
-                        const fs = await import('node:fs');
-                        const eventData = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
-                        const before = eventData.before;
-                        const after = eventData.after;
-                        if (after &&
-                            before &&
-                            before !== '0000000000000000000000000000000000000000') {
-                            baseRef = before;
-                            headRef = after;
-                            info(`Using push SHAs - base: ${baseRef}, head: ${headRef}`);
-                        }
-                    }
-                }
-                catch (error) {
-                    debug(`Failed to parse push event data: ${error}`);
-                }
-            }
-        }
-        const filesPatterns = getMultilineInput('files', {
-            required: false
+        const detector = new FileChangeDetectorService(new GitAdapter());
+        const fileFilter = new FileFilterAdapter();
+        const resolver = new TerraformProjectResolverService(new FilesystemAdapter());
+        const changedFiles = await collectChangedFiles(inputs, refs, detector, fileFilter);
+        const affectedProjects = await resolver.resolveAffectedProjects(changedFiles, {
+            allProjects: inputs.allProjects,
+            resolveRoot: inputs.resolveRoot,
+            ignoredPaths: inputs.ignoredPaths,
+            projectMarker: inputs.projectMarker || undefined
         });
-        const filesIgnorePatterns = getMultilineInput('files-ignore', { required: false });
-        const resolveRootInput = getBooleanInput('resolve-root');
-        const allProjectsInput = getBooleanInput('all-projects');
-        const ignorePathsInput = getMultilineInput('ignore-paths');
-        const projectMarkerInput = getInput('project-marker', {
-            required: false
-        });
-        const gitAdapter = new GitAdapter();
-        const fileFilterAdapter = new FileFilterAdapter();
-        const filesystemAdapter = new FilesystemAdapter();
-        const fileChangeDetector = new FileChangeDetectorService(gitAdapter);
-        const terraformProjectResolver = new TerraformProjectResolverService(filesystemAdapter);
-        let changedFiles = [];
-        if (allProjectsInput) {
-            info('all-projects is enabled, resolving all Terraform projects');
+        info(`Found ${affectedProjects.length} affected project(s)`);
+        if (affectedProjects.length > 0) {
+            info(`Affected directories: ${affectedProjects.join(', ')}`);
         }
-        else {
-            changedFiles = await fileChangeDetector.detectChangedFiles({
-                files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
-                base: baseRef || undefined,
-                head: headRef || undefined
-            });
-            info(`Detected ${changedFiles.length} changed files`);
-            changedFiles = fileFilterAdapter.filter(changedFiles, filesPatterns, filesIgnorePatterns);
-            info(`After filtering: ${changedFiles.length} files`);
-        }
-        const changedDirectories = await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
-            allProjects: allProjectsInput,
-            resolveRoot: resolveRootInput,
-            ignoredPaths: ignorePathsInput,
-            projectMarker: projectMarkerInput || undefined
-        });
-        info(`Found ${changedDirectories.length} affected project(s)`);
-        if (changedDirectories.length > 0) {
-            info(`Affected directories: ${changedDirectories.join(', ')}`);
-        }
-        setOutput('changed-directories', JSON.stringify(changedDirectories));
+        setOutput('changed-directories', JSON.stringify(affectedProjects));
     }
     catch (error) {
         if (error instanceof Error)
