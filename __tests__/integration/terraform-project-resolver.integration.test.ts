@@ -30,7 +30,8 @@ describe('TerraformProjectResolverService - Integration Test', () => {
 
   it('resolves transitive dependency: shared module → project-module → envs', async () => {
     await repo.writeFiles({
-      'modules/cloud-run/main.tf': 'resource "google_cloud_run_service" "svc" {}',
+      'modules/cloud-run/main.tf':
+        'resource "google_cloud_run_service" "svc" {}',
       'modules/cloud-run/variables.tf': 'variable "name" {}',
       'core-services/authentication/module/cloud-run.tf':
         'module "run" { source = "../../../modules/cloud-run" }',

@@ -83,6 +83,7 @@ export async function run(): Promise<void> {
       { required: false }
     )
     const resolveRootInput: boolean = core.getBooleanInput('resolve-root')
+    const allProjectsInput: boolean = core.getBooleanInput('all-projects')
     const ignorePathsInput: string[] = core.getMultilineInput('ignore-paths')
     const projectMarkerInput: string = core.getInput('project-marker', {
       required: false
@@ -97,24 +98,31 @@ export async function run(): Promise<void> {
       filesystemAdapter
     )
 
-    let changedFiles = await fileChangeDetector.detectChangedFiles({
-      files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
-      base: baseRef || undefined,
-      head: headRef || undefined
-    })
+    let changedFiles: string[] = []
 
-    core.info(`Detected ${changedFiles.length} changed files`)
+    if (allProjectsInput) {
+      core.info('all-projects is enabled, resolving all Terraform projects')
+    } else {
+      changedFiles = await fileChangeDetector.detectChangedFiles({
+        files: changedFilesInput.length > 0 ? changedFilesInput : undefined,
+        base: baseRef || undefined,
+        head: headRef || undefined
+      })
 
-    changedFiles = fileFilterAdapter.filter(
-      changedFiles,
-      filesPatterns,
-      filesIgnorePatterns
-    )
+      core.info(`Detected ${changedFiles.length} changed files`)
 
-    core.info(`After filtering: ${changedFiles.length} files`)
+      changedFiles = fileFilterAdapter.filter(
+        changedFiles,
+        filesPatterns,
+        filesIgnorePatterns
+      )
+
+      core.info(`After filtering: ${changedFiles.length} files`)
+    }
 
     const changedDirectories =
       await terraformProjectResolver.resolveAffectedProjects(changedFiles, {
+        allProjects: allProjectsInput,
         resolveRoot: resolveRootInput,
         ignoredPaths: ignorePathsInput,
         projectMarker: projectMarkerInput || undefined

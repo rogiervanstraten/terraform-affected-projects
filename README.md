@@ -11,6 +11,7 @@ module dependencies and changed files.
   (shared modules, multi-environment, multi-domain, multi-account)
 - **Git-based or manual file input** - Auto-detect changes via Git diff or
   provide files manually
+- **Full project discovery mode** - Return all Terraform project roots on demand
 - **Glob pattern filtering** - Include/exclude files using glob patterns
 - **Security-hardened** - No shell injection vulnerabilities, input sanitization
 
@@ -76,6 +77,10 @@ project root.
 
     # Optional: Return all projects if root directory changes
     resolve-root: false
+
+    # Optional: Return all projects regardless of changed files.
+    # Takes precedence over `resolve-root` when enabled.
+    all-projects: false
 
     # Optional: Paths to ignore
     ignore-paths: |

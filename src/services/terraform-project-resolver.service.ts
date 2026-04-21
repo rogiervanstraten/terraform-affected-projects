@@ -3,6 +3,7 @@ import type { FilesystemPort } from '../ports/filesystem.port.js'
 import { DependencyResolverTelemetry } from '../utils/dependency-resolver-telemetry.util.js'
 
 export interface TerraformProjectResolverConfig {
+  allProjects?: boolean
   resolveRoot?: boolean
   ignoredPaths?: string[]
   projectMarker?: string
@@ -73,10 +74,15 @@ export class TerraformProjectResolverService {
     config: TerraformProjectResolverConfig = {}
   ): Promise<string[]> {
     const {
+      allProjects = false,
       resolveRoot = false,
       ignoredPaths = ['.'],
       projectMarker = 'provider.tf'
     } = config
+
+    if (allProjects) {
+      return this.findAllProjects(projectMarker)
+    }
 
     const telemetry = new DependencyResolverTelemetry()
     const projectDirectories: string[] = []
@@ -99,8 +105,8 @@ export class TerraformProjectResolverService {
       processedDirs.add(currentPath)
 
       if (currentPath === '.' && resolveRoot) {
-        const allProjects = await this.findAllProjects(projectMarker)
-        return Array.from(new Set([...projectDirectories, ...allProjects]))
+        const rootProjects = await this.findAllProjects(projectMarker)
+        return Array.from(new Set([...projectDirectories, ...rootProjects]))
       }
 
       if (!currentPath || ignoredPaths.includes(currentPath)) {

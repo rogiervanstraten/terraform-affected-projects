@@ -55,6 +55,11 @@ inputs:
       'Should projects be resolved from changes to files in the root directory?'
     required: false
     default: 'false'
+  all-projects:
+    description:
+      'Return all Terraform projects regardless of detected changed files.'
+    required: false
+    default: 'false'
   project-marker:
     description: >
       The filename used to identify a directory as a Terraform project root. Any

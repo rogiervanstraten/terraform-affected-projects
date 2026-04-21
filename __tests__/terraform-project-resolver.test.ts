@@ -103,5 +103,13 @@ describe('TerraformProjectResolverService', () => {
       // Assert: No projects affected
       expect(result).toEqual([])
     })
+
+    it('should return all projects when allProjects is enabled', async () => {
+      const result = await resolver.resolveAffectedProjects([], {
+        allProjects: true
+      })
+
+      expect(result).toEqual(['service-a/production', 'service-b/production'])
+    })
   })
 })
