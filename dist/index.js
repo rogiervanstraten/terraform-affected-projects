@@ -38,6 +38,7 @@ import 'string_decoder';
 import 'child_process';
 import 'timers';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 // We use any as a valid input type
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -37442,10 +37443,6 @@ class GitAdapter {
         if (!validPattern.test(sanitized)) {
             throw new Error(`Invalid git reference format: "${ref}". Only alphanumeric characters, dots, hyphens, underscores, slashes, carets, and tildes are allowed.`);
         }
-        const dangerousPatterns = [';', '&&', '||', '|', '$', '`', '(', ')'];
-        if (dangerousPatterns.some((pattern) => sanitized.includes(pattern))) {
-            throw new Error(`Git reference contains potentially dangerous characters: "${ref}"`);
-        }
         return sanitized;
     }
     executeGitDiff(base, head) {
@@ -37717,7 +37714,7 @@ function expand_(str, max, isTop) {
             }
             const pad = n.some(isPadded);
             N = [];
-            for (let i = x; test(i, y); i += incr) {
+            for (let i = x; test(i, y) && N.length < max; i += incr) {
                 let c;
                 if (isAlphaSequence) {
                     c = String.fromCharCode(i);
@@ -40014,6 +40011,8 @@ class FileChangeDetectorService {
     }
 }
 
+const MODULE_SEGMENT = /modules?$/;
+const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**'];
 class TerraformProjectResolverService {
     filesystem;
     constructor(filesystem) {
@@ -40022,6 +40021,7 @@ class TerraformProjectResolverService {
     async findFilesReferencingModule(modulePath) {
         const allTfFiles = await this.filesystem.findFiles('*.tf');
         const referencingFiles = [];
+        const resolvedModulePath = path$1.resolve(modulePath);
         for (const file of allTfFiles) {
             const fileDir = path$1.dirname(file);
             if (fileDir === modulePath)
@@ -40036,8 +40036,8 @@ class TerraformProjectResolverService {
                         continue;
                     }
                     const resolvedSourcePath = path$1.resolve(fileDir, sourcePath);
-                    const resolvedModulePath = path$1.resolve(modulePath);
-                    if (resolvedSourcePath === resolvedModulePath) {
+                    if (resolvedSourcePath === resolvedModulePath ||
+                        resolvedModulePath.startsWith(`${resolvedSourcePath}${path$1.sep}`)) {
                         referencingFiles.push(file);
                         break;
                     }
@@ -40049,19 +40049,25 @@ class TerraformProjectResolverService {
         }
         return referencingFiles;
     }
+    async findDirsReferencingModule(modulePath) {
+        const referencingFiles = await this.findFilesReferencingModule(modulePath);
+        return Array.from(new Set(referencingFiles.map((f) => path$1.dirname(f))));
+    }
     async findAllProjects(projectMarker) {
-        const markerFiles = await this.filesystem.findFiles(projectMarker, [
-            '*/module/*',
-            '*/modules/*'
-        ]);
+        const markerFiles = await this.filesystem.findFiles(projectMarker, MODULE_EXCLUDE_PATTERNS);
         return markerFiles.map((file) => path$1.dirname(file));
     }
-    categorizeDirectory(dirPath) {
-        if (dirPath.includes('modules/'))
-            return 'shared-module';
-        if (dirPath.includes('/module'))
-            return 'project-module';
-        return 'direct';
+    isModuleDirectory(dirPath) {
+        return dirPath.split('/').some((segment) => MODULE_SEGMENT.test(segment));
+    }
+    findProjectRoot(dir, projectDirs, ignoredPaths) {
+        let current = dir;
+        while (current && current !== '.' && !ignoredPaths.includes(current)) {
+            if (projectDirs.has(current))
+                return current;
+            current = path$1.dirname(current);
+        }
+        return null;
     }
     async resolveAffectedProjects(changedFiles, config = {}) {
         const { allProjects = false, resolveRoot = false, ignoredPaths = ['.'], projectMarker = 'provider.tf' } = config;
@@ -40070,6 +40076,7 @@ class TerraformProjectResolverService {
         }
         const projectDirectories = [];
         const processedDirs = new Set();
+        let knownProjectDirs;
         const changedDirectories = Array.from(new Set(changedFiles.map((file) => path$1.dirname(file))));
         debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
         const stack = [...changedDirectories];
@@ -40086,27 +40093,20 @@ class TerraformProjectResolverService {
             if (!currentPath || ignoredPaths.includes(currentPath)) {
                 continue;
             }
-            const category = this.categorizeDirectory(currentPath);
-            switch (category) {
-                case 'shared-module': {
-                    const dependentFiles = await this.findFilesReferencingModule(currentPath);
-                    const dependentDirs = Array.from(new Set(dependentFiles.map((f) => path$1.dirname(f))));
-                    debug(`Shared module ${currentPath} → ${dependentDirs.length} dependent dir(s): ${dependentDirs.join(', ')}`);
-                    stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)));
-                    break;
-                }
-                case 'project-module': {
-                    const referencingFiles = await this.findFilesReferencingModule(currentPath);
-                    const referencingDirs = Array.from(new Set(referencingFiles.map((f) => path$1.dirname(f))));
-                    debug(`Project module ${currentPath} → ${referencingDirs.length} referencing project(s): ${referencingDirs.join(', ')}`);
-                    projectDirectories.push(...referencingDirs);
-                    break;
-                }
-                default: {
-                    debug(`Direct project: ${currentPath}`);
-                    projectDirectories.push(currentPath);
-                    break;
-                }
+            if (this.isModuleDirectory(currentPath)) {
+                const dependentDirs = await this.findDirsReferencingModule(currentPath);
+                debug(`Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`);
+                stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)));
+                continue;
+            }
+            knownProjectDirs ??= new Set(await this.findAllProjects(projectMarker));
+            const projectRoot = this.findProjectRoot(currentPath, knownProjectDirs, ignoredPaths);
+            if (projectRoot) {
+                debug(`Direct project: ${currentPath} → ${projectRoot}`);
+                projectDirectories.push(projectRoot);
+            }
+            else {
+                debug(`Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`);
             }
         }
         return Array.from(new Set(projectDirectories));
@@ -40131,11 +40131,10 @@ async function resolveGitRefs(inputs) {
             return { base: '', head: '' };
     }
 }
-async function resolvePullRequestRefs(eventPath) {
+function resolvePullRequestRefs(eventPath) {
     try {
         if (!eventPath)
             throw new Error('No GITHUB_EVENT_PATH');
-        const { readFileSync } = await import('node:fs');
         const eventData = JSON.parse(readFileSync(eventPath, 'utf8'));
         if (!eventData.pull_request) {
             throw new Error('No pull_request data in event');
@@ -40155,12 +40154,11 @@ async function resolvePullRequestRefs(eventPath) {
         return { base, head };
     }
 }
-async function resolvePushRefs(eventPath) {
+function resolvePushRefs(eventPath) {
     const empty = { base: '', head: '' };
     try {
         if (!eventPath)
             return empty;
-        const { readFileSync } = await import('node:fs');
         const { before, after } = JSON.parse(readFileSync(eventPath, 'utf8'));
         if (!after || !before || before === ZERO_SHA)
             return empty;
@@ -40233,6 +40231,5 @@ async function run() {
     }
 }
 
-/* istanbul ignore next */
 run();
 //# sourceMappingURL=index.js.map

@@ -9,6 +9,9 @@ export interface TerraformProjectResolverConfig {
   projectMarker?: string
 }
 
+const MODULE_SEGMENT = /modules?$/
+const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**']
+
 export class TerraformProjectResolverService {
   constructor(private readonly filesystem: FilesystemPort) {}
 
@@ -17,6 +20,7 @@ export class TerraformProjectResolverService {
   ): Promise<string[]> {
     const allTfFiles = await this.filesystem.findFiles('*.tf')
     const referencingFiles: string[] = []
+    const resolvedModulePath = path.resolve(modulePath)
 
     for (const file of allTfFiles) {
       const fileDir = path.dirname(file)
@@ -37,9 +41,11 @@ export class TerraformProjectResolverService {
           }
 
           const resolvedSourcePath = path.resolve(fileDir, sourcePath)
-          const resolvedModulePath = path.resolve(modulePath)
 
-          if (resolvedSourcePath === resolvedModulePath) {
+          if (
+            resolvedSourcePath === resolvedModulePath ||
+            resolvedModulePath.startsWith(`${resolvedSourcePath}${path.sep}`)
+          ) {
             referencingFiles.push(file)
             break
           }
@@ -52,21 +58,39 @@ export class TerraformProjectResolverService {
     return referencingFiles
   }
 
+  private async findDirsReferencingModule(
+    modulePath: string
+  ): Promise<string[]> {
+    const referencingFiles = await this.findFilesReferencingModule(modulePath)
+    return Array.from(new Set(referencingFiles.map((f) => path.dirname(f))))
+  }
+
   private async findAllProjects(projectMarker: string): Promise<string[]> {
-    const markerFiles = await this.filesystem.findFiles(projectMarker, [
-      '*/module/*',
-      '*/modules/*'
-    ])
+    const markerFiles = await this.filesystem.findFiles(
+      projectMarker,
+      MODULE_EXCLUDE_PATTERNS
+    )
 
     return markerFiles.map((file) => path.dirname(file))
   }
 
-  private categorizeDirectory(
-    dirPath: string
-  ): 'shared-module' | 'project-module' | 'direct' {
-    if (dirPath.includes('modules/')) return 'shared-module'
-    if (dirPath.includes('/module')) return 'project-module'
-    return 'direct'
+  private isModuleDirectory(dirPath: string): boolean {
+    return dirPath.split('/').some((segment) => MODULE_SEGMENT.test(segment))
+  }
+
+  private findProjectRoot(
+    dir: string,
+    projectDirs: Set<string>,
+    ignoredPaths: string[]
+  ): string | null {
+    let current = dir
+
+    while (current && current !== '.' && !ignoredPaths.includes(current)) {
+      if (projectDirs.has(current)) return current
+      current = path.dirname(current)
+    }
+
+    return null
   }
 
   async resolveAffectedProjects(
@@ -86,6 +110,7 @@ export class TerraformProjectResolverService {
 
     const projectDirectories: string[] = []
     const processedDirs = new Set<string>()
+    let knownProjectDirs: Set<string> | undefined
 
     const changedDirectories = Array.from(
       new Set(changedFiles.map((file) => path.dirname(file)))
@@ -114,44 +139,31 @@ export class TerraformProjectResolverService {
         continue
       }
 
-      const category = this.categorizeDirectory(currentPath)
+      if (this.isModuleDirectory(currentPath)) {
+        const dependentDirs = await this.findDirsReferencingModule(currentPath)
 
-      switch (category) {
-        case 'shared-module': {
-          const dependentFiles =
-            await this.findFilesReferencingModule(currentPath)
-          const dependentDirs = Array.from(
-            new Set(dependentFiles.map((f) => path.dirname(f)))
-          )
+        core.debug(
+          `Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`
+        )
 
-          core.debug(
-            `Shared module ${currentPath} → ${dependentDirs.length} dependent dir(s): ${dependentDirs.join(', ')}`
-          )
+        stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)))
+        continue
+      }
 
-          stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)))
-          break
-        }
+      knownProjectDirs ??= new Set(await this.findAllProjects(projectMarker))
+      const projectRoot = this.findProjectRoot(
+        currentPath,
+        knownProjectDirs,
+        ignoredPaths
+      )
 
-        case 'project-module': {
-          const referencingFiles =
-            await this.findFilesReferencingModule(currentPath)
-          const referencingDirs = Array.from(
-            new Set(referencingFiles.map((f) => path.dirname(f)))
-          )
-
-          core.debug(
-            `Project module ${currentPath} → ${referencingDirs.length} referencing project(s): ${referencingDirs.join(', ')}`
-          )
-
-          projectDirectories.push(...referencingDirs)
-          break
-        }
-
-        default: {
-          core.debug(`Direct project: ${currentPath}`)
-          projectDirectories.push(currentPath)
-          break
-        }
+      if (projectRoot) {
+        core.debug(`Direct project: ${currentPath} → ${projectRoot}`)
+        projectDirectories.push(projectRoot)
+      } else {
+        core.debug(
+          `Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`
+        )
       }
     }
 

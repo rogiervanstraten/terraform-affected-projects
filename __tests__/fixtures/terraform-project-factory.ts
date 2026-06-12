@@ -233,6 +233,79 @@ export class TerraformProjectFactory {
   }
 
   /**
+   * E-commerce platform structure with project modules that contain
+   * service-named subdirectories (module/catalog, module/search)
+   * Pattern: project module subdirs, nested shared modules, direct projects
+   */
+  static createEcommercePlatformProject(): MockFilesystem {
+    return this.fromTree({
+      platform: {
+        core: {
+          module: {
+            'main.tf':
+              'module "catalog" { source = "./catalog" }\nmodule "search" { source = "./search" }',
+            catalog: {
+              'main.tf': 'resource "google_cloud_run_service" "catalog" {}',
+              'variables.tf': 'variable "env" {}'
+            },
+            search: {
+              'main.tf': 'resource "google_cloud_run_service" "search" {}',
+              'variables.tf': 'variable "env" {}'
+            }
+          },
+          staging: {
+            'provider.tf': 'provider "google" {}',
+            'main.tf': 'module "core" { source = "../module" }'
+          },
+          production: {
+            'provider.tf': 'provider "google" {}',
+            'main.tf': 'module "core" { source = "../module" }'
+          }
+        }
+      },
+      checkout: {
+        module: {
+          'main.tf': 'resource "google_cloud_run_service" "checkout" {}'
+        },
+        staging: {
+          'provider.tf': 'provider "google" {}',
+          'main.tf': 'module "checkout" { source = "../module" }'
+        },
+        production: {
+          'provider.tf': 'provider "google" {}',
+          'main.tf': 'module "checkout" { source = "../module" }'
+        }
+      },
+      inventory: {
+        warehouse: {
+          production: {
+            'provider.tf': 'provider "google" {}',
+            'main.tf':
+              'module "sftp" { source = "../../../modules/compute_engine/sftpgo" }',
+            '.terraform.lock.hcl': 'provider "registry.terraform.io/..." {}'
+          }
+        }
+      },
+      content: {
+        'newsletter-assets': {
+          'provider.tf': 'provider "google" {}',
+          'main.tf':
+            'module "sftp" { source = "../../modules/compute_engine/sftpgo" }'
+        }
+      },
+      modules: {
+        compute_engine: {
+          sftpgo: {
+            'main.tf': 'resource "google_compute_instance" "sftpgo" {}',
+            'variables.tf': 'variable "machine_type" {}'
+          }
+        }
+      },
+      'README.md': '# E-Commerce Platform'
+    })
+  }
+
+  /**
    * Flat multi-account structure
    * Pattern: account-X/ directories at root, shared-modules/
    */

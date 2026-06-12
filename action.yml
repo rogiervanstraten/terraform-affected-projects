@@ -41,6 +41,7 @@ inputs:
     default: |
       **/*.tf
       **/*.tfvars
+      **/*.hcl
   files-ignore:
     description: |
       Exclude files matching these glob patterns (multiline).
