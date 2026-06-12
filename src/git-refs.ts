@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import * as core from '@actions/core'
 
 export interface GitRefs {
@@ -25,11 +26,10 @@ export async function resolveGitRefs(inputs: GitRefs): Promise<GitRefs> {
   }
 }
 
-async function resolvePullRequestRefs(eventPath?: string): Promise<GitRefs> {
+function resolvePullRequestRefs(eventPath?: string): GitRefs {
   try {
     if (!eventPath) throw new Error('No GITHUB_EVENT_PATH')
 
-    const { readFileSync } = await import('node:fs')
     const eventData = JSON.parse(readFileSync(eventPath, 'utf8'))
 
     if (!eventData.pull_request) {
@@ -52,13 +52,12 @@ async function resolvePullRequestRefs(eventPath?: string): Promise<GitRefs> {
   }
 }
 
-async function resolvePushRefs(eventPath?: string): Promise<GitRefs> {
+function resolvePushRefs(eventPath?: string): GitRefs {
   const empty: GitRefs = { base: '', head: '' }
 
   try {
     if (!eventPath) return empty
 
-    const { readFileSync } = await import('node:fs')
     const { before, after } = JSON.parse(readFileSync(eventPath, 'utf8'))
 
     if (!after || !before || before === ZERO_SHA) return empty
