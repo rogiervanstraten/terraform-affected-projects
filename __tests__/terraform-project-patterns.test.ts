@@ -185,7 +185,9 @@ describe('TerraformProjectResolverService - Different Monorepo Patterns', () => 
     })
 
     it('should resolve lock file changes to their project', async () => {
-      const taintedFiles = ['inventory/warehouse/production/.terraform.lock.hcl']
+      const taintedFiles = [
+        'inventory/warehouse/production/.terraform.lock.hcl'
+      ]
       const result = await resolver.resolveAffectedProjects(taintedFiles)
 
       expect(result).toEqual(['inventory/warehouse/production'])
