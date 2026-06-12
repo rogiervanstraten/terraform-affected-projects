@@ -17,13 +17,6 @@ export class GitAdapter implements GitPort {
       )
     }
 
-    const dangerousPatterns = [';', '&&', '||', '|', '$', '`', '(', ')']
-    if (dangerousPatterns.some((pattern) => sanitized.includes(pattern))) {
-      throw new Error(
-        `Git reference contains potentially dangerous characters: "${ref}"`
-      )
-    }
-
     return sanitized
   }
 
