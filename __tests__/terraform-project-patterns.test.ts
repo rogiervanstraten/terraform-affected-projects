@@ -118,6 +118,87 @@ describe('TerraformProjectResolverService - Different Monorepo Patterns', () => 
     })
   })
 
+  describe('E-commerce platform pattern (project module subdirectories)', () => {
+    /**
+     * Structure: platform/core/module/{catalog,search} service subdirs,
+     * checkout/module, nested shared modules/compute_engine/sftpgo,
+     * direct projects under inventory/ and content/
+     */
+    let filesystem: MockFilesystemAdapter
+    let resolver: TerraformProjectResolverService
+
+    beforeEach(() => {
+      filesystem = new MockFilesystemAdapter(
+        TerraformProjectFactory.createEcommercePlatformProject()
+      )
+      resolver = new TerraformProjectResolverService(filesystem)
+    })
+
+    it('should detect all envs when a project module subdirectory changes', async () => {
+      const taintedFiles = ['platform/core/module/catalog/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('platform/core/staging')
+      expect(result).toContain('platform/core/production')
+      expect(result).toHaveLength(2)
+    })
+
+    it('should detect a direct project when its own files change', async () => {
+      const taintedFiles = ['inventory/warehouse/production/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toEqual(['inventory/warehouse/production'])
+    })
+
+    it('should return nothing for a directory that is not a project', async () => {
+      const taintedFiles = ['inventory/warehouse/invalid-dir/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toEqual([])
+    })
+
+    it('should detect all envs when a flat project module changes', async () => {
+      const taintedFiles = ['checkout/module/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('checkout/staging')
+      expect(result).toContain('checkout/production')
+      expect(result).toHaveLength(2)
+    })
+
+    it('should detect all envs when the project module root changes', async () => {
+      const taintedFiles = ['platform/core/module/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('platform/core/staging')
+      expect(result).toContain('platform/core/production')
+      expect(result).toHaveLength(2)
+    })
+
+    it('should detect all dependents of a nested shared module', async () => {
+      const taintedFiles = ['modules/compute_engine/sftpgo/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('content/newsletter-assets')
+      expect(result).toContain('inventory/warehouse/production')
+      expect(result).toHaveLength(2)
+    })
+
+    it('should resolve lock file changes to their project', async () => {
+      const taintedFiles = ['inventory/warehouse/production/.terraform.lock.hcl']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toEqual(['inventory/warehouse/production'])
+    })
+
+    it('should resolve nested non-project subdirectories to their project root', async () => {
+      const taintedFiles = ['inventory/warehouse/production/configs/app.tfvars']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toEqual(['inventory/warehouse/production'])
+    })
+  })
+
   describe('Multi-account flat pattern', () => {
     /**
      * Structure: shared-modules/ and account-X/ at root
