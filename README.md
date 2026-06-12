@@ -45,6 +45,10 @@ services/api/prod/
 Set `project-marker: backend.tf` so the action knows `services/api/prod/` is a
 project root.
 
+Changed directories that are not module paths are resolved to the nearest
+ancestor directory containing the marker file. A changed directory with no
+marker in itself or any ancestor is not a project and produces no output.
+
 ## Usage
 
 ```yaml
@@ -61,14 +65,18 @@ project root.
       modules/vpc/main.tf
       services/api/production/main.tf
 
-    # Optional: Git references for diff (auto-detected for pull_request and push events)
+    # Optional: Git references for diff (auto-detected for pull_request and
+    # push events). Both must be set together; providing only one falls back
+    # to diffing the current commit.
     base-ref: 'main'
     head-ref: 'HEAD'
 
-    # Optional: Include only specific file patterns
+    # Optional: Include only files matching these glob patterns.
+    # Defaults to '**/*.tf', '**/*.tfvars' and '**/*.hcl'.
     files: |
       **/*.tf
       **/*.tfvars
+      **/*.hcl
 
     # Optional: Exclude file patterns
     files-ignore: |
@@ -148,6 +156,10 @@ services/api-gateway/
 
 **Result**: All environments (`dev`, `staging`, `prod`) are affected
 
+This also works when the change is inside a **subdirectory** of the project
+module (e.g. `services/api-gateway/module/account/main.tf`): the change is
+attributed to any project referencing `../module` or the subdirectory itself.
+
 **Scenario 3: Nested Dependencies**
 
 ```
@@ -166,13 +178,18 @@ resolution)
 
 Works with various Terraform monorepo structures:
 
-- **Shared modules**: `modules/` or `_modules/` with project references
+- **Shared modules**: `modules/`, `_modules/` or `shared-modules/` with project
+  references, including nested module trees (`modules/compute_engine/sftpgo/`)
 - **Multi-environment**: `service-X/{dev,staging,prod}`
 - **Multi-domain**: Nested organizational structures (`domain-A/subdomain-I/`)
 - **Multi-account**: Flat account-based layouts (`account-production/`,
   `account-staging/`)
 - **Project modules**: Service-specific `*/module` directories with environment
-  deployments
+  deployments, including service-named subdirectories
+  (`platform/core/module/catalog/`)
+
+A directory is treated as a module when any of its path segments ends in
+`module` or `modules`.
 
 ## Development
 
