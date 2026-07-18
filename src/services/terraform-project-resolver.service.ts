@@ -15,6 +15,37 @@ const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**']
 export class TerraformProjectResolverService {
   constructor(private readonly filesystem: FilesystemPort) {}
 
+  private extractGitSourceLocalPath(sourcePath: string): string | null {
+    let url = sourcePath
+
+    if (url.startsWith('git::')) {
+      url = url.slice('git::'.length)
+      // Strip the scheme (https://, ssh://, etc.) so the first // we find
+      // is the subdir separator, not the protocol separator.
+      const schemeEnd = url.indexOf('://')
+      if (schemeEnd !== -1) url = url.slice(schemeEnd + 3)
+    } else if (
+      /^github\.com\//.test(url) ||
+      /^bitbucket\.org\//.test(url) ||
+      /^gitlab\.com\//.test(url)
+    ) {
+      // Registry shorthand — no scheme to strip
+    } else {
+      return null
+    }
+
+    const subdirIdx = url.indexOf('//')
+    if (subdirIdx === -1) return null
+
+    const subpath = url.slice(subdirIdx + 2)
+
+    // Pinned refs (?ref=v1.0.0) are skipped — a change to the .tf file that
+    // bumps the ref is what triggers detection for pinned consumers.
+    if (subpath.includes('?')) return null
+
+    return subpath || null
+  }
+
   private async findFilesReferencingModule(
     modulePath: string
   ): Promise<string[]> {
@@ -36,18 +67,30 @@ export class TerraformProjectResolverService {
         for (const match of matches) {
           const sourcePath = match[1]
 
-          if (!sourcePath.startsWith('./') && !sourcePath.startsWith('../')) {
+          if (sourcePath.startsWith('./') || sourcePath.startsWith('../')) {
+            const resolvedSourcePath = path.resolve(fileDir, sourcePath)
+
+            if (
+              resolvedSourcePath === resolvedModulePath ||
+              resolvedModulePath.startsWith(`${resolvedSourcePath}${path.sep}`)
+            ) {
+              referencingFiles.push(file)
+              break
+            }
             continue
           }
 
-          const resolvedSourcePath = path.resolve(fileDir, sourcePath)
+          const gitLocalPath = this.extractGitSourceLocalPath(sourcePath)
+          if (gitLocalPath !== null) {
+            const resolvedGitPath = path.resolve(gitLocalPath)
 
-          if (
-            resolvedSourcePath === resolvedModulePath ||
-            resolvedModulePath.startsWith(`${resolvedSourcePath}${path.sep}`)
-          ) {
-            referencingFiles.push(file)
-            break
+            if (
+              resolvedGitPath === resolvedModulePath ||
+              resolvedModulePath.startsWith(`${resolvedGitPath}${path.sep}`)
+            ) {
+              referencingFiles.push(file)
+              break
+            }
           }
         }
       } catch {
