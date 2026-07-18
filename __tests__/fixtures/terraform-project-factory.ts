@@ -352,4 +352,66 @@ export class TerraformProjectFactory {
       }
     })
   }
+
+  /**
+   * Project structure with git source module references
+   * Pattern: modules/ referenced via git:: URLs (same-repo self-references)
+   *
+   * Key scenarios covered:
+   * - git::https://... with no ref → consumer should be flagged when module changes
+   * - github.com/org/repo// shorthand → treated the same as git::
+   * - git::https://...?ref=v1.0.0 → consumer pinned; NOT flagged by module change
+   * - Mixed: relative + git sources referencing the same module
+   */
+  static createGitSourceProject(): MockFilesystem {
+    return this.fromTree({
+      modules: {
+        vpc: {
+          'main.tf': 'resource "aws_vpc" "main" {}',
+          'outputs.tf': 'output "vpc_id" { value = aws_vpc.main.id }'
+        },
+        rds: {
+          'main.tf': 'resource "aws_db_instance" "main" {}',
+          'outputs.tf': 'output "endpoint" {}'
+        }
+      },
+      projects: {
+        'api-service': {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf':
+            'module "vpc" { source = "git::https://github.com/org/repo.git//modules/vpc" }'
+        },
+        'api-service-v2': {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf':
+            'module "vpc" { source = "github.com/org/repo//modules/vpc" }'
+        },
+        'db-service': {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf':
+            'module "db" { source = "git::https://github.com/org/repo.git//modules/rds" }'
+        },
+        'legacy-api': {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf':
+            'module "vpc" { source = "git::https://github.com/org/repo.git//modules/vpc?ref=v1.0.0" }'
+        },
+        'shared-infra': {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf':
+            'module "vpc" { source = "git::https://github.com/org/repo.git//modules/vpc" }\nmodule "db" { source = "git::https://github.com/org/repo.git//modules/rds" }'
+        }
+      },
+      'mixed-approach': {
+        module: {
+          'main.tf':
+            'module "vpc" { source = "../../modules/vpc" }\nresource "aws_instance" "app" {}'
+        },
+        production: {
+          'provider.tf': 'provider "aws" {}',
+          'main.tf': 'module "app" { source = "../module" }'
+        }
+      }
+    })
+  }
 }

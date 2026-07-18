@@ -252,4 +252,76 @@ describe('TerraformProjectResolverService - Different Monorepo Patterns', () => 
       expect(result).toHaveLength(1)
     })
   })
+
+  describe('Git source modules pattern', () => {
+    /**
+     * Structure: modules/ referenced via git:: or github.com// shorthand URLs.
+     * Consumers without a ref should be flagged when the local module path changes.
+     * Consumers with ?ref=<version> are pinned and should NOT be flagged by a module
+     * change — only a direct change to their own .tf file triggers detection.
+     */
+    let filesystem: MockFilesystemAdapter
+    let resolver: TerraformProjectResolverService
+
+    beforeEach(() => {
+      filesystem = new MockFilesystemAdapter(
+        TerraformProjectFactory.createGitSourceProject()
+      )
+      resolver = new TerraformProjectResolverService(filesystem)
+    })
+
+    it('should detect a project using a git:: source when the referenced module path changes', async () => {
+      const taintedFiles = ['modules/vpc/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('projects/api-service')
+    })
+
+    it('should detect a project using a github.com// shorthand source when the module changes', async () => {
+      const taintedFiles = ['modules/vpc/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('projects/api-service-v2')
+    })
+
+    it('should detect all unrefed consumers when a shared git-sourced module changes', async () => {
+      const taintedFiles = ['modules/vpc/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('projects/api-service')
+      expect(result).toContain('projects/api-service-v2')
+      expect(result).toContain('projects/shared-infra')
+    })
+
+    it('should NOT flag a consumer pinned with ?ref= when only the module changes', async () => {
+      const taintedFiles = ['modules/vpc/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).not.toContain('projects/legacy-api')
+    })
+
+    it('should flag a pinned consumer when its own .tf file changes', async () => {
+      const taintedFiles = ['projects/legacy-api/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('projects/legacy-api')
+    })
+
+    it('should detect only projects referencing the changed module, not others', async () => {
+      const taintedFiles = ['modules/rds/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('projects/db-service')
+      expect(result).toContain('projects/shared-infra')
+      expect(result).not.toContain('projects/api-service')
+      expect(result).not.toContain('projects/api-service-v2')
+    })
+
+    it('should detect a project that mixes relative and git sources for the same module', async () => {
+      const taintedFiles = ['modules/vpc/main.tf']
+      const result = await resolver.resolveAffectedProjects(taintedFiles)
+
+      expect(result).toContain('mixed-approach/production')
+    })
+  })
 })
