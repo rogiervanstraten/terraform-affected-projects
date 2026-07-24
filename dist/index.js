@@ -38953,7 +38953,8 @@ class GitAdapter {
             const output = execSync(command, {
                 encoding: 'utf-8',
                 maxBuffer: 10 * 1024 * 1024,
-                timeout: 30000
+                timeout: 30000,
+                stdio: ['ignore', 'pipe', 'pipe']
             });
             return output
                 .split('\n')
@@ -38971,7 +38972,8 @@ class GitAdapter {
         try {
             const mergeBase = execSync(`git merge-base ${this.sanitizeRef(head)} ${this.sanitizeRef(base)}`, {
                 encoding: 'utf-8',
-                timeout: 10000
+                timeout: 10000,
+                stdio: ['ignore', 'pipe', 'pipe']
             }).trim();
             return this.executeGitDiff(mergeBase, head);
         }
@@ -39019,11 +39021,13 @@ class GitAdapter {
         }
         catch {
             try {
+                this.logger.debug('HEAD^ not resolvable, falling back to git show HEAD');
                 const command = 'git show --name-only --format= HEAD';
                 const output = execSync(command, {
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
-                    timeout: 30000
+                    timeout: 30000,
+                    stdio: ['ignore', 'pipe', 'pipe']
                 });
                 return output
                     .split('\n')
