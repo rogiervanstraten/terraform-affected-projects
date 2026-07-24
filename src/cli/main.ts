@@ -63,7 +63,7 @@ interface CliOptions {
   help: boolean
 }
 
-export function parseCliArgs(argv: string[]): CliOptions {
+function parseCliArgs(argv: string[]): CliOptions {
   const { values } = parseArgs({
     args: argv,
     allowPositionals: false,
