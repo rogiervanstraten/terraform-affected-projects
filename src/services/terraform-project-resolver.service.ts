@@ -1,6 +1,6 @@
 import path from 'node:path'
-import * as core from '@actions/core'
 import type { FilesystemPort } from '../ports/filesystem.port.js'
+import { noopLogger, type LoggerPort } from '../ports/logger.port.js'
 
 export interface TerraformProjectResolverConfig {
   allProjects?: boolean
@@ -13,7 +13,10 @@ const MODULE_SEGMENT = /modules?$/
 const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**']
 
 export class TerraformProjectResolverService {
-  constructor(private readonly filesystem: FilesystemPort) {}
+  constructor(
+    private readonly filesystem: FilesystemPort,
+    private readonly logger: LoggerPort = noopLogger
+  ) {}
 
   private extractGitSourceLocalPath(sourcePath: string): string | null {
     let url = sourcePath
@@ -159,7 +162,7 @@ export class TerraformProjectResolverService {
       new Set(changedFiles.map((file) => path.dirname(file)))
     )
 
-    core.debug(
+    this.logger.debug(
       `Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`
     )
 
@@ -185,7 +188,7 @@ export class TerraformProjectResolverService {
       if (this.isModuleDirectory(currentPath)) {
         const dependentDirs = await this.findDirsReferencingModule(currentPath)
 
-        core.debug(
+        this.logger.debug(
           `Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`
         )
 
@@ -201,10 +204,10 @@ export class TerraformProjectResolverService {
       )
 
       if (projectRoot) {
-        core.debug(`Direct project: ${currentPath} → ${projectRoot}`)
+        this.logger.debug(`Direct project: ${currentPath} → ${projectRoot}`)
         projectDirectories.push(projectRoot)
       } else {
-        core.debug(
+        this.logger.debug(
           `Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`
         )
       }

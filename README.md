@@ -112,6 +112,51 @@ marker in itself or any ancestor is not a project and produces no output.
   run: echo "Affected projects: ${{ steps.affected.outputs.changed-directories }}"
 ```
 
+## CLI Usage
+
+The same detection logic is available as a standalone CLI, useful for local
+debugging or non-GitHub pipelines. Build it with `npm run package`, then run
+`dist/cli.js` from your Terraform repository (or point it there with `--cwd`):
+
+```sh
+node /path/to/terraform-affected-projects/dist/cli.js --base origin/main --head HEAD
+```
+
+Or install it globally to get the `tfaf` command (also available under its full
+name `terraform-affected-projects`):
+
+```sh
+npm install --global /path/to/terraform-affected-projects
+tfaf --base origin/main --head HEAD
+```
+
+Affected project directories are printed to stdout, one per line (or as a JSON
+array with `--json`). All logging goes to stderr, so stdout is safe to pipe.
+
+Without `--base`, `--changed-file` or `--all-projects`, uncommitted changes
+(staged, unstaged and untracked) are used as the change set; a clean working
+tree yields no projects.
+
+```text
+Options:
+  -b, --base <ref>            Base git reference for the diff
+  -H, --head <ref>            Head git reference for the diff (default: HEAD)
+      --changed-file <path>   Changed file to use instead of git detection
+                              (repeatable)
+      --files <glob>          Include only files matching this glob
+                              (repeatable, default: **/*.tf, **/*.tfvars, **/*.hcl)
+      --files-ignore <glob>   Exclude files matching this glob (repeatable)
+      --resolve-root          Resolve all projects when root files change
+  -a, --all-projects          Return all projects regardless of changes
+      --project-marker <file> Filename marking a project root
+                              (default: provider.tf)
+      --ignore-path <path>    Path to ignore (repeatable, default: ., .git, node_modules)
+  -C, --cwd <dir>             Run as if started in <dir>
+      --json                  Print a JSON array instead of one path per line
+  -v, --verbose               Print debug logs to stderr
+  -h, --help                  Show this help
+```
+
 ## Why This Action?
 
 In Terraform monorepos, a change to a shared module can affect multiple

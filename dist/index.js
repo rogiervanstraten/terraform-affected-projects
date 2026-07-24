@@ -38911,7 +38911,29 @@ function info(message) {
     process.stdout.write(message + os.EOL);
 }
 
+class ActionsLoggerAdapter {
+    debug(message) {
+        debug(message);
+    }
+    info(message) {
+        info(message);
+    }
+    warning(message) {
+        warning(message);
+    }
+}
+
+const noopLogger = {
+    debug: () => { },
+    info: () => { },
+    warning: () => { }
+};
+
 class GitAdapter {
+    logger;
+    constructor(logger = noopLogger) {
+        this.logger = logger;
+    }
     sanitizeRef(ref) {
         if (!ref || typeof ref !== 'string') {
             throw new Error('Invalid git reference: must be a non-empty string');
@@ -38958,10 +38980,38 @@ class GitAdapter {
                 return this.executeGitDiff(base, head);
             }
             catch {
-                warning(`Unable to determine changes between ${base} and ${head}, falling back to current commit`);
+                this.logger.warning(`Unable to determine changes between ${base} and ${head}, falling back to current commit`);
                 return this.getChangedFilesForCurrentCommit();
             }
         }
+    }
+    async getUncommittedFiles() {
+        const output = execSync('git status --porcelain --untracked-files=all', {
+            encoding: 'utf-8',
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: 30000,
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        return output
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => this.parseStatusPath(line));
+    }
+    parseStatusPath(line) {
+        let filePath = line.slice(3);
+        const renameSeparator = filePath.indexOf(' -> ');
+        if (renameSeparator !== -1) {
+            filePath = filePath.slice(renameSeparator + 4);
+        }
+        if (filePath.startsWith('"') && filePath.endsWith('"')) {
+            try {
+                filePath = JSON.parse(filePath);
+            }
+            catch {
+                filePath = filePath.slice(1, -1);
+            }
+        }
+        return filePath;
     }
     async getChangedFilesForCurrentCommit() {
         try {
@@ -41493,8 +41543,10 @@ const MODULE_SEGMENT = /modules?$/;
 const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**'];
 class TerraformProjectResolverService {
     filesystem;
-    constructor(filesystem) {
+    logger;
+    constructor(filesystem, logger = noopLogger) {
         this.filesystem = filesystem;
+        this.logger = logger;
     }
     extractGitSourceLocalPath(sourcePath) {
         let url = sourcePath;
@@ -41591,7 +41643,7 @@ class TerraformProjectResolverService {
         const processedDirs = new Set();
         let knownProjectDirs;
         const changedDirectories = Array.from(new Set(changedFiles.map((file) => path$1.dirname(file))));
-        debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
+        this.logger.debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
         const stack = [...changedDirectories];
         while (stack.length > 0) {
             const currentPath = stack.pop();
@@ -41608,18 +41660,18 @@ class TerraformProjectResolverService {
             }
             if (this.isModuleDirectory(currentPath)) {
                 const dependentDirs = await this.findDirsReferencingModule(currentPath);
-                debug(`Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`);
+                this.logger.debug(`Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`);
                 stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)));
                 continue;
             }
             knownProjectDirs ??= new Set(await this.findAllProjects(projectMarker));
             const projectRoot = this.findProjectRoot(currentPath, knownProjectDirs, ignoredPaths);
             if (projectRoot) {
-                debug(`Direct project: ${currentPath} → ${projectRoot}`);
+                this.logger.debug(`Direct project: ${currentPath} → ${projectRoot}`);
                 projectDirectories.push(projectRoot);
             }
             else {
-                debug(`Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`);
+                this.logger.debug(`Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`);
             }
         }
         return Array.from(new Set(projectDirectories));
@@ -41722,9 +41774,10 @@ async function run() {
             base: inputs.baseRef,
             head: inputs.headRef
         });
-        const detector = new FileChangeDetectorService(new GitAdapter());
+        const logger = new ActionsLoggerAdapter();
+        const detector = new FileChangeDetectorService(new GitAdapter(logger));
         const fileFilter = new FileFilterAdapter();
-        const resolver = new TerraformProjectResolverService(new FilesystemAdapter());
+        const resolver = new TerraformProjectResolverService(new FilesystemAdapter(), logger);
         const changedFiles = await collectChangedFiles(inputs, refs, detector, fileFilter);
         const affectedProjects = await resolver.resolveAffectedProjects(changedFiles, {
             allProjects: inputs.allProjects,
