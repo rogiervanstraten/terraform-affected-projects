@@ -26,6 +26,9 @@
     "tfaf": "./dist/cli.js",
     "terraform-affected-projects": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=24"
   },
