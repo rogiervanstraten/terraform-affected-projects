@@ -38911,7 +38911,29 @@ function info(message) {
     process.stdout.write(message + os.EOL);
 }
 
+class ActionsLoggerAdapter {
+    debug(message) {
+        debug(message);
+    }
+    info(message) {
+        info(message);
+    }
+    warning(message) {
+        warning(message);
+    }
+}
+
+const noopLogger = {
+    debug: () => { },
+    info: () => { },
+    warning: () => { }
+};
+
 class GitAdapter {
+    logger;
+    constructor(logger = noopLogger) {
+        this.logger = logger;
+    }
     sanitizeRef(ref) {
         if (!ref || typeof ref !== 'string') {
             throw new Error('Invalid git reference: must be a non-empty string');
@@ -38931,7 +38953,8 @@ class GitAdapter {
             const output = execSync(command, {
                 encoding: 'utf-8',
                 maxBuffer: 10 * 1024 * 1024,
-                timeout: 30000
+                timeout: 30000,
+                stdio: ['ignore', 'pipe', 'pipe']
             });
             return output
                 .split('\n')
@@ -38949,7 +38972,8 @@ class GitAdapter {
         try {
             const mergeBase = execSync(`git merge-base ${this.sanitizeRef(head)} ${this.sanitizeRef(base)}`, {
                 encoding: 'utf-8',
-                timeout: 10000
+                timeout: 10000,
+                stdio: ['ignore', 'pipe', 'pipe']
             }).trim();
             return this.executeGitDiff(mergeBase, head);
         }
@@ -38958,10 +38982,38 @@ class GitAdapter {
                 return this.executeGitDiff(base, head);
             }
             catch {
-                warning(`Unable to determine changes between ${base} and ${head}, falling back to current commit`);
+                this.logger.warning(`Unable to determine changes between ${base} and ${head}, falling back to current commit`);
                 return this.getChangedFilesForCurrentCommit();
             }
         }
+    }
+    async getUncommittedFiles() {
+        const output = execSync('git status --porcelain --untracked-files=all', {
+            encoding: 'utf-8',
+            maxBuffer: 10 * 1024 * 1024,
+            timeout: 30000,
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+        return output
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => this.parseStatusPath(line));
+    }
+    parseStatusPath(line) {
+        let filePath = line.slice(3);
+        const renameSeparator = filePath.indexOf(' -> ');
+        if (renameSeparator !== -1) {
+            filePath = filePath.slice(renameSeparator + 4);
+        }
+        if (filePath.startsWith('"') && filePath.endsWith('"')) {
+            try {
+                filePath = JSON.parse(filePath);
+            }
+            catch {
+                filePath = filePath.slice(1, -1);
+            }
+        }
+        return filePath;
     }
     async getChangedFilesForCurrentCommit() {
         try {
@@ -38969,11 +39021,13 @@ class GitAdapter {
         }
         catch {
             try {
+                this.logger.debug('HEAD^ not resolvable, falling back to git show HEAD');
                 const command = 'git show --name-only --format= HEAD';
                 const output = execSync(command, {
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
-                    timeout: 30000
+                    timeout: 30000,
+                    stdio: ['ignore', 'pipe', 'pipe']
                 });
                 return output
                     .split('\n')
@@ -39057,6 +39111,17 @@ const closePattern = /\\}/g;
 const commaPattern = /\\,/g;
 const periodPattern = /\\\./g;
 const EXPANSION_MAX = 100_000;
+// `EXPANSION_MAX` caps the *number* of expansions, but not their length. An
+// input like `'{a,b}'.repeat(1500)` stays under that count - its output is
+// truncated to 100k results - while making every result ~1500 characters
+// long. The result set, and the intermediate arrays built while combining
+// brace sets, then grow large enough to exhaust memory and crash the process
+// (CVE-2026-14257). `EXPANSION_MAX_LENGTH` bounds the total number of
+// characters the accumulator may hold at any point, so memory stays flat no
+// matter how many brace groups are chained. The limit sits well above any
+// realistic expansion (100k results hitting `EXPANSION_MAX` measure ~1M
+// characters) so legitimate input is unaffected.
+const EXPANSION_MAX_LENGTH = 4_000_000;
 function numeric(str) {
     return !isNaN(str) ? parseInt(str, 10) : str.charCodeAt(0);
 }
@@ -39105,7 +39170,7 @@ function expand(str, options = {}) {
     if (!str) {
         return [];
     }
-    const { max = EXPANSION_MAX } = options;
+    const { max = EXPANSION_MAX, maxLength = EXPANSION_MAX_LENGTH } = options;
     // I don't know why Bash 4.3 does this, but it does.
     // Anything starting with {} will have the first two bytes preserved
     // but *only* at the top level, so {},a}b will not expand to anything,
@@ -39115,7 +39180,7 @@ function expand(str, options = {}) {
     if (str.slice(0, 2) === '{}') {
         str = '\\{\\}' + str.slice(2);
     }
-    return expand_(escapeBraces(str), max, true).map(unescapeBraces);
+    return expand_(escapeBraces(str), max, maxLength, true).map(unescapeBraces);
 }
 function embrace(str) {
     return '{' + str + '}';
@@ -39129,22 +39194,113 @@ function lte(i, y) {
 function gte(i, y) {
     return i >= y;
 }
-function expand_(str, max, isTop) {
-    /** @type {string[]} */
-    const expansions = [];
-    const m = balanced('{', '}', str);
-    if (!m)
-        return [str];
-    // no need to expand pre, since it is guaranteed to be free of brace-sets
-    const pre = m.pre;
-    const post = m.post.length ? expand_(m.post, max, false) : [''];
-    if (/\$$/.test(m.pre)) {
-        for (let k = 0; k < post.length && k < max; k++) {
-            const expansion = pre + '{' + m.body + '}' + post[k];
-            expansions.push(expansion);
+// Build `{ acc[a] + pre + values[v] }` for every combination, capping the
+// number of results at `max` and the total number of characters at `maxLength`.
+// This is the one place output grows, so bounding it here keeps the single
+// accumulator - and therefore memory - flat regardless of how many brace groups
+// are combined (CVE-2026-14257).
+function combine(acc, pre, values, max, maxLength, dropEmpties) {
+    const out = [];
+    let length = 0;
+    for (let a = 0; a < acc.length; a++) {
+        for (let v = 0; v < values.length; v++) {
+            if (out.length >= max)
+                return out;
+            const expansion = acc[a] + pre + values[v];
+            // Bash drops empty results at the top level. Skip them before they count
+            // against `max`, so `max` bounds the number of *kept* results.
+            if (dropEmpties && !expansion)
+                continue;
+            if (length + expansion.length > maxLength)
+                return out;
+            out.push(expansion);
+            length += expansion.length;
         }
     }
-    else {
+    return out;
+}
+// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
+// sequence body.
+function expandSequence(body, isAlphaSequence, max) {
+    const n = body.split(/\.\./);
+    const N = [];
+    // A sequence body always splits into two or three parts, but the compiler
+    // can't know that.
+    /* c8 ignore start */
+    if (n[0] === undefined || n[1] === undefined) {
+        return N;
+    }
+    /* c8 ignore stop */
+    const x = numeric(n[0]);
+    const y = numeric(n[1]);
+    const width = Math.max(n[0].length, n[1].length);
+    let incr = n.length === 3 && n[2] !== undefined ?
+        Math.max(Math.abs(numeric(n[2])), 1)
+        : 1;
+    let test = lte;
+    const reverse = y < x;
+    if (reverse) {
+        incr *= -1;
+        test = gte;
+    }
+    const pad = n.some(isPadded);
+    for (let i = x; test(i, y) && N.length < max; i += incr) {
+        let c;
+        if (isAlphaSequence) {
+            c = String.fromCharCode(i);
+            if (c === '\\') {
+                c = '';
+            }
+        }
+        else {
+            c = String(i);
+            if (pad) {
+                const need = width - c.length;
+                if (need > 0) {
+                    const z = new Array(need + 1).join('0');
+                    if (i < 0) {
+                        c = '-' + z + c.slice(1);
+                    }
+                    else {
+                        c = z + c;
+                    }
+                }
+            }
+        }
+        N.push(c);
+    }
+    return N;
+}
+function expand_(str, max, maxLength, isTop) {
+    // Consume the string's top-level brace groups left to right, threading a
+    // running set of combined prefixes (`acc`). Expanding the tail iteratively -
+    // rather than recursing on `m.post` once per group - keeps the native stack
+    // depth constant, so deeply chained input (`'{a,b}'.repeat(3000)`) can no
+    // longer overflow the stack, and leaves a single accumulator whose size
+    // `maxLength` bounds directly (CVE-2026-14257).
+    let acc = [''];
+    // Bash drops empty results, but only when the *first* top-level group is a
+    // comma set - a sequence like `{a..\}` may legitimately yield ''. The drop
+    // is on the final strings, so it is applied to whichever `combine` produces
+    // them (the one with no brace set left in the tail).
+    let dropEmpties = false;
+    let firstGroup = true;
+    for (;;) {
+        const m = balanced('{', '}', str);
+        // No brace set left: the rest of the string is literal.
+        if (!m) {
+            return combine(acc, str, [''], max, maxLength, dropEmpties);
+        }
+        // no need to expand pre, since it is guaranteed to be free of brace-sets
+        const pre = m.pre;
+        if (/\$$/.test(pre)) {
+            acc = combine(acc, pre + '{' + m.body + '}', [''], max, maxLength, dropEmpties && !m.post.length);
+            firstGroup = false;
+            if (!m.post.length)
+                break;
+            str = m.post;
+            continue;
+        }
         const isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
         const isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
         const isSequence = isNumericSequence || isAlphaSequence;
@@ -39153,87 +39309,47 @@ function expand_(str, max, isTop) {
             // {a},b}
             if (m.post.match(/,(?!,).*\}/)) {
                 str = m.pre + '{' + m.body + escClose + m.post;
-                return expand_(str, max, true);
+                isTop = true;
+                continue;
             }
-            return [str];
+            // Nothing here expands, so the whole remaining string is literal.
+            return combine(acc, pre + '{' + m.body + '}' + m.post, [''], max, maxLength, dropEmpties);
         }
-        let n;
+        if (firstGroup) {
+            dropEmpties = isTop && !isSequence;
+            firstGroup = false;
+        }
+        let values;
         if (isSequence) {
-            n = m.body.split(/\.\./);
+            values = expandSequence(m.body, isAlphaSequence, max);
         }
         else {
-            n = parseCommaParts(m.body);
+            let n = parseCommaParts(m.body);
             if (n.length === 1 && n[0] !== undefined) {
                 // x{{a,b}}y ==> x{a}y x{b}y
-                n = expand_(n[0], max, false).map(embrace);
+                n = expand_(n[0], max, maxLength, false).map(embrace);
                 //XXX is this necessary? Can't seem to hit it in tests.
                 /* c8 ignore start */
                 if (n.length === 1) {
-                    return post.map(p => m.pre + n[0] + p);
+                    acc = combine(acc, pre + n[0], [''], max, maxLength, dropEmpties && !m.post.length);
+                    if (!m.post.length)
+                        break;
+                    str = m.post;
+                    continue;
                 }
                 /* c8 ignore stop */
             }
-        }
-        // at this point, n is the parts, and we know it's not a comma set
-        // with a single entry.
-        let N;
-        if (isSequence && n[0] !== undefined && n[1] !== undefined) {
-            const x = numeric(n[0]);
-            const y = numeric(n[1]);
-            const width = Math.max(n[0].length, n[1].length);
-            let incr = n.length === 3 && n[2] !== undefined ?
-                Math.max(Math.abs(numeric(n[2])), 1)
-                : 1;
-            let test = lte;
-            const reverse = y < x;
-            if (reverse) {
-                incr *= -1;
-                test = gte;
-            }
-            const pad = n.some(isPadded);
-            N = [];
-            for (let i = x; test(i, y) && N.length < max; i += incr) {
-                let c;
-                if (isAlphaSequence) {
-                    c = String.fromCharCode(i);
-                    if (c === '\\') {
-                        c = '';
-                    }
-                }
-                else {
-                    c = String(i);
-                    if (pad) {
-                        const need = width - c.length;
-                        if (need > 0) {
-                            const z = new Array(need + 1).join('0');
-                            if (i < 0) {
-                                c = '-' + z + c.slice(1);
-                            }
-                            else {
-                                c = z + c;
-                            }
-                        }
-                    }
-                }
-                N.push(c);
-            }
-        }
-        else {
-            N = [];
+            values = [];
             for (let j = 0; j < n.length; j++) {
-                N.push.apply(N, expand_(n[j], max, false));
+                values.push.apply(values, expand_(n[j], max, maxLength, false));
             }
         }
-        for (let j = 0; j < N.length; j++) {
-            for (let k = 0; k < post.length && expansions.length < max; k++) {
-                const expansion = pre + N[j] + post[k];
-                if (!isTop || isSequence || expansion) {
-                    expansions.push(expansion);
-                }
-            }
-        }
+        acc = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length);
+        if (!m.post.length)
+            break;
+        str = m.post;
     }
-    return expansions;
+    return acc;
 }
 
 const MAX_PATTERN_LENGTH = 1024 * 64;
@@ -41493,8 +41609,10 @@ const MODULE_SEGMENT = /modules?$/;
 const MODULE_EXCLUDE_PATTERNS = ['**/*module/**', '**/*modules/**'];
 class TerraformProjectResolverService {
     filesystem;
-    constructor(filesystem) {
+    logger;
+    constructor(filesystem, logger = noopLogger) {
         this.filesystem = filesystem;
+        this.logger = logger;
     }
     extractGitSourceLocalPath(sourcePath) {
         let url = sourcePath;
@@ -41591,7 +41709,7 @@ class TerraformProjectResolverService {
         const processedDirs = new Set();
         let knownProjectDirs;
         const changedDirectories = Array.from(new Set(changedFiles.map((file) => path$1.dirname(file))));
-        debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
+        this.logger.debug(`Discovered ${changedDirectories.length} changed directories: ${changedDirectories.join(', ')}`);
         const stack = [...changedDirectories];
         while (stack.length > 0) {
             const currentPath = stack.pop();
@@ -41608,18 +41726,18 @@ class TerraformProjectResolverService {
             }
             if (this.isModuleDirectory(currentPath)) {
                 const dependentDirs = await this.findDirsReferencingModule(currentPath);
-                debug(`Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`);
+                this.logger.debug(`Module ${currentPath} → ${dependentDirs.length} referencing dir(s): ${dependentDirs.join(', ')}`);
                 stack.push(...dependentDirs.filter((d) => !processedDirs.has(d)));
                 continue;
             }
             knownProjectDirs ??= new Set(await this.findAllProjects(projectMarker));
             const projectRoot = this.findProjectRoot(currentPath, knownProjectDirs, ignoredPaths);
             if (projectRoot) {
-                debug(`Direct project: ${currentPath} → ${projectRoot}`);
+                this.logger.debug(`Direct project: ${currentPath} → ${projectRoot}`);
                 projectDirectories.push(projectRoot);
             }
             else {
-                debug(`Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`);
+                this.logger.debug(`Skipped ${currentPath}: no ${projectMarker} found in directory or its parents`);
             }
         }
         return Array.from(new Set(projectDirectories));
@@ -41722,9 +41840,10 @@ async function run() {
             base: inputs.baseRef,
             head: inputs.headRef
         });
-        const detector = new FileChangeDetectorService(new GitAdapter());
+        const logger = new ActionsLoggerAdapter();
+        const detector = new FileChangeDetectorService(new GitAdapter(logger));
         const fileFilter = new FileFilterAdapter();
-        const resolver = new TerraformProjectResolverService(new FilesystemAdapter());
+        const resolver = new TerraformProjectResolverService(new FilesystemAdapter(), logger);
         const changedFiles = await collectChangedFiles(inputs, refs, detector, fileFilter);
         const affectedProjects = await resolver.resolveAffectedProjects(changedFiles, {
             allProjects: inputs.allProjects,

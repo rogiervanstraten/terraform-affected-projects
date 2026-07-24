@@ -1,4 +1,5 @@
 import * as core from '@actions/core'
+import { ActionsLoggerAdapter } from './adapters/actions-logger.adapter.js'
 import { GitAdapter } from './adapters/git.adapter.js'
 import { FileFilterAdapter } from './adapters/file-filter.adapter.js'
 import { FilesystemAdapter } from './adapters/filesystem.adapter.js'
@@ -71,10 +72,12 @@ export async function run(): Promise<void> {
       head: inputs.headRef
     })
 
-    const detector = new FileChangeDetectorService(new GitAdapter())
+    const logger = new ActionsLoggerAdapter()
+    const detector = new FileChangeDetectorService(new GitAdapter(logger))
     const fileFilter = new FileFilterAdapter()
     const resolver = new TerraformProjectResolverService(
-      new FilesystemAdapter()
+      new FilesystemAdapter(),
+      logger
     )
 
     const changedFiles = await collectChangedFiles(

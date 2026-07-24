@@ -81,6 +81,46 @@ describe('GitAdapter - Integration Test', () => {
     expect(changedFiles).toContain('vpc.tf')
   })
 
+  it('should return no uncommitted files in a clean repository', async () => {
+    await repo.writeFile('main.tf', 'provider "aws" {}')
+    repo.commit('Initial commit')
+
+    const uncommittedFiles = await adapter.getUncommittedFiles()
+
+    expect(uncommittedFiles).toHaveLength(0)
+  })
+
+  it('should detect modified, staged and untracked files', async () => {
+    await repo.writeFile('committed.tf', 'provider "aws" {}')
+    await repo.writeFile('modified.tf', 'variable "env" { default = "dev" }')
+    await repo.writeFile('staged.tf', 'variable "region" {}')
+    repo.commit('Initial commit')
+
+    await repo.writeFile('modified.tf', 'variable "env" { default = "prod" }')
+    await repo.writeFile('staged.tf', 'variable "region" { default = "eu" }')
+    repo.stageFile('staged.tf')
+    await repo.writeFile('untracked.tf', 'resource "aws_vpc" "main" {}')
+
+    const uncommittedFiles = await adapter.getUncommittedFiles()
+
+    expect(uncommittedFiles).toHaveLength(3)
+    expect(uncommittedFiles).toContain('modified.tf')
+    expect(uncommittedFiles).toContain('staged.tf')
+    expect(uncommittedFiles).toContain('untracked.tf')
+    expect(uncommittedFiles).not.toContain('committed.tf')
+  })
+
+  it('should detect uncommitted files in nested directories', async () => {
+    await repo.writeFile('main.tf', 'provider "aws" {}')
+    repo.commit('Initial commit')
+
+    await repo.writeFile('modules/vpc/main.tf', 'resource "aws_vpc" {}')
+
+    const uncommittedFiles = await adapter.getUncommittedFiles()
+
+    expect(uncommittedFiles).toContain('modules/vpc/main.tf')
+  })
+
   it('should detect changes for the current commit', async () => {
     await repo.writeFile('old.tf', 'provider "aws" {}')
     repo.commit('Old file')

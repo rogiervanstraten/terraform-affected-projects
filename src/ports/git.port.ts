@@ -16,4 +16,10 @@ export interface GitPort {
    * @returns Array of changed file paths
    */
   getChangedFilesForCurrentCommit(): Promise<string[]>
+
+  /**
+   * Get files with uncommitted changes (staged, unstaged and untracked)
+   * @returns Array of changed file paths
+   */
+  getUncommittedFiles(): Promise<string[]>
 }

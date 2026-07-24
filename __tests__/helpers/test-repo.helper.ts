@@ -64,6 +64,10 @@ export class TestRepoHelper {
     return this.exec('git rev-parse HEAD')
   }
 
+  stageFile(path: string): void {
+    this.exec(`git add ${path}`)
+  }
+
   /**
    * Get current HEAD SHA
    */
